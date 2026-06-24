@@ -49,6 +49,20 @@
 - `mustChangePassword` chỉ là signal frontend redirect, không block access token
 - Inactive member vẫn còn trong nhóm (chỉ ẩn khỏi courses) — reactivate bằng toggle
 
+## [2026-06-24 23:50] Fix company_admin không có quyền lưu cài đặt branding
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/organization.service.ts` — `updateOrganization()` dòng 158: thêm điều kiện `org.id !== companyId` vào permission check. Root cause: org cấp company có `companyId = null` (nó chính là company), nên `org.companyId !== companyId` luôn `true` và throw ForbiddenError. Hàm `getOrganization` đã xử lý đúng nhưng `updateOrganization` bị thiếu điều kiện này.
+
+**Kết quả:**
+- `npm run build` thành công, `pm2 restart lms-web` online
+- company_admin có thể lưu cài đặt branding của công ty mình
+
+**Lưu ý / Rủi ro:**
+- Fix nhất quán với điều kiện đã có trong `getOrganization` (dòng 113)
+
 ## [2026-06-24 23:30] Fix logo upload ExpiresParamError + lưu objectName để tái tạo URL
 
 **Loại:** fix

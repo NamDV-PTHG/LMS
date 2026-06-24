@@ -155,7 +155,7 @@ export async function updateOrganization(
 ) {
   const org = await prisma.organization.findUnique({ where: { id } });
   if (!org || !org.isActive) throw new NotFoundError('Tổ chức');
-  if (!isGroupAdmin && org.companyId !== companyId) {
+  if (!isGroupAdmin && org.companyId !== companyId && org.id !== companyId) {
     throw new ForbiddenError('Không có quyền chỉnh sửa tổ chức này');
   }
 
