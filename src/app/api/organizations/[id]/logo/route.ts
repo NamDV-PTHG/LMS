@@ -61,14 +61,14 @@ export const POST = withRole(
         'Content-Type': resolvedMime,
       });
 
-      // 5-year presigned URL, rewritten to public address
-      const logoUrl = await getPresignedDownloadUrl(objectName, 5 * 365 * 24 * 3600);
+      // Store objectName in metadata so branding API can regenerate presigned
+      // URL on each request (MinIO presigned URLs expire after max 7 days).
+      const logoUrl = await getPresignedDownloadUrl(objectName, 7 * 24 * 3600);
 
-      // Merge logoUrl into existing metadata (preserve other keys)
       const currentMeta = (org.metadata as Record<string, unknown>) ?? {};
       await prisma.organization.update({
         where: { id: orgId },
-        data: { metadata: { ...currentMeta, logoUrl } },
+        data: { metadata: { ...currentMeta, logoObjectName: objectName, logoUrl } },
       });
 
       return NextResponse.json({ success: true, data: { logoUrl } });

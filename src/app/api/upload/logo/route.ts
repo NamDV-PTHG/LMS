@@ -50,10 +50,10 @@ export const POST = withRole(
         'Content-Type': resolvedMime,
       });
 
-      // Use helper that rewrites host to MINIO_PUBLIC_URL
-      const signedUrl = await getPresignedDownloadUrl(objectName, 5 * 365 * 24 * 3600);
-
-      return NextResponse.json({ success: true, data: { url: signedUrl, objectName } });
+      // Return both a fresh 7-day URL (for immediate display) and objectName
+      // (to persist in DB so URLs can be regenerated after expiry).
+      const url = await getPresignedDownloadUrl(objectName, 7 * 24 * 3600);
+      return NextResponse.json({ success: true, data: { url, objectName } });
     } catch (err) {
       return handleApiError(err);
     }

@@ -49,6 +49,26 @@
 - `mustChangePassword` chỉ là signal frontend redirect, không block access token
 - Inactive member vẫn còn trong nhóm (chỉ ẩn khỏi courses) — reactivate bằng toggle
 
+## [2026-06-24 23:30] Fix logo upload ExpiresParamError + lưu objectName để tái tạo URL
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/api/upload/logo/route.ts`: Sửa TTL từ `5 * 365 * 24 * 3600` (5 năm) → `7 * 24 * 3600` (7 ngày) — MinIO giới hạn presigned URL tối đa 7 ngày. Thêm trả về `objectName` trong response để frontend lưu lại.
+- `src/app/api/organizations/[id]/logo/route.ts`: Sửa TTL tương tự. Lưu cả `logoObjectName` lẫn `logoUrl` vào `metadata` của org.
+- `src/app/api/public/branding/route.ts`: Import `getPresignedDownloadUrl`. Nếu `meta.logoObjectName` tồn tại → tái tạo presigned URL 7 ngày mới trên mỗi request (logo không bao giờ hết hạn). Fallback về `meta.logoUrl` nếu MinIO không khả dụng.
+- `src/app/(dashboard)/settings/page.tsx`: Thêm `logoObjectName` vào interface `BrandingForm` và `DEFAULT_BRANDING`. Load `logoObjectName` từ metadata khi fetch. Lưu cả `logoObjectName` khi upload thành công → tự động được include khi save branding.
+
+**Kết quả:**
+- `npm run build` thành công, `pm2 restart lms-web` online
+- Test upload `Logo PTHG mau.png` → response `{"success":true,"data":{"url":"...","objectName":"logos/..."}}`
+- Logo luôn khả dụng — URL được tái tạo mới khi branding API được gọi
+
+**Lưu ý / Rủi ro:**
+- Root cause: MinIO giới hạn presigned URL tối đa 7 ngày (604800s) — passing giá trị lớn hơn gây `ExpiresParamError`
+- Giải pháp bền vững: lưu `objectName` trong DB, regenerate URL mỗi lần thay vì lưu URL tĩnh
+- Logo cũ (chỉ có `logoUrl`, không có `logoObjectName`) vẫn hoạt động nhờ fallback
+
 ## [2026-06-24 19:00] Fix video streaming, quiz CSV import, logo upload
 
 **Loại:** fix + feature

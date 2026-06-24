@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getPresignedDownloadUrl } from '@/lib/minio';
 
 /**
  * GET /api/public/branding — no auth required.
@@ -17,6 +18,18 @@ export async function GET() {
 
     const meta = (rootOrg?.metadata as Record<string, string> | null) ?? {};
 
+    // If logo was uploaded to MinIO, regenerate a fresh presigned URL so it
+    // never expires regardless of when the logo was originally uploaded.
+    let logoUrl: string | null = meta.logoUrl ?? null;
+    if (meta.logoObjectName) {
+      try {
+        logoUrl = await getPresignedDownloadUrl(meta.logoObjectName, 7 * 24 * 3600);
+      } catch {
+        // Fall back to stored URL if MinIO is unavailable
+        logoUrl = meta.logoUrl ?? null;
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: {
@@ -24,7 +37,7 @@ export async function GET() {
         loginSubtitle: meta.loginSubtitle ?? 'Đăng nhập để tiếp tục',
         loginBgUrl: meta.loginBgUrl ?? null,
         loginBgColor: meta.loginBgColor ?? null,
-        logoUrl: meta.logoUrl ?? null,
+        logoUrl,
         primaryColor: meta.primaryColor ?? '#1a56db',
       },
     });

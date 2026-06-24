@@ -15,6 +15,7 @@ interface Organization {
 
 interface BrandingForm {
   logoUrl: string;
+  logoObjectName: string;
   companyName: string;
   themePreset: string;
   primaryColor: string;
@@ -36,6 +37,7 @@ const THEME_PRESETS = [
 
 const DEFAULT_BRANDING: BrandingForm = {
   logoUrl: '',
+  logoObjectName: '',
   companyName: '',
   themePreset: 'ocean',
   primaryColor: '#1a56db',
@@ -160,6 +162,7 @@ export default function SettingsPage() {
           const m = (res.data?.metadata ?? {}) as Record<string, string>;
           setBranding({
             logoUrl: m.logoUrl ?? '',
+            logoObjectName: m.logoObjectName ?? '',
             companyName: m.companyName ?? '',
             themePreset: m.themePreset ?? 'ocean',
             primaryColor: m.primaryColor ?? '#1a56db',
@@ -184,7 +187,11 @@ export default function SettingsPage() {
         body: fd,
       }).then((r) => r.json());
       if (res.success) {
-        setBranding((b) => ({ ...b, [field]: res.data.url }));
+        if (field === 'logoUrl') {
+          setBranding((b) => ({ ...b, logoUrl: res.data.url, logoObjectName: res.data.objectName ?? '' }));
+        } else {
+          setBranding((b) => ({ ...b, [field]: res.data.url }));
+        }
         toast('success', field === 'logoUrl' ? 'Upload logo thành công' : 'Upload ảnh nền thành công');
       } else {
         toast('error', 'Upload thất bại', res.error);
