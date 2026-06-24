@@ -962,15 +962,16 @@ model CompanyLearningPolicy {
 }
 
 model AiServiceConfig {
-  id        String   @id @default(uuid())
-  companyId String?
-  name      String
-  endpoint  String
-  modelName String
-  apiKey    String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String   @id @default(uuid())
+  companyId         String?  // null = global (group-level)
+  name              String
+  endpoint          String
+  modelName         String
+  apiKey            String?  // API key cho external AI (OpenAI, Gemini v.v.)
+  allowedCompanyIds Json?    // null = tất cả công ty; array UUID = giới hạn công ty được dùng
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 // ============================================================

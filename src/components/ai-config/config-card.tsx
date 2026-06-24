@@ -7,8 +7,15 @@ interface AiConfig {
   name: string;
   endpoint: string;
   modelName: string;
+  apiKey: string | null;
+  allowedCompanyIds: string[] | null;
   isActive: boolean;
   updatedAt: string;
+}
+
+interface Company {
+  id: string;
+  name: string;
 }
 
 interface TestResult {
@@ -21,11 +28,13 @@ interface TestResult {
 
 interface ConfigCardProps {
   config: AiConfig;
+  companies: Company[];
+  isGroupAdmin: boolean;
   accessToken: string;
   onUpdated: () => void;
 }
 
-export function ConfigCard({ config, accessToken, onUpdated }: ConfigCardProps) {
+export function ConfigCard({ config, companies, isGroupAdmin, accessToken, onUpdated }: ConfigCardProps) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [editing, setEditing] = useState(false);
@@ -34,6 +43,9 @@ export function ConfigCard({ config, accessToken, onUpdated }: ConfigCardProps) 
     endpoint: config.endpoint,
     modelName: config.modelName,
     isActive: config.isActive,
+    apiKey: '',                          // empty = keep existing; filled = update
+    changeApiKey: false,                 // toggle to show the input
+    allowedCompanyIds: config.allowedCompanyIds as string[] | null,
   });
   const [saving, setSaving] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -61,12 +73,32 @@ export function ConfigCard({ config, accessToken, onUpdated }: ConfigCardProps) 
     if (json.success) setAvailableModels(json.data.models ?? []);
   };
 
+  const toggleCompany = (id: string) => {
+    setForm((prev) => {
+      const current = prev.allowedCompanyIds ?? [];
+      const next = current.includes(id) ? current.filter((c) => c !== id) : [...current, id];
+      return { ...prev, allowedCompanyIds: next.length === 0 ? null : next };
+    });
+  };
+
   const handleSave = async () => {
     setSaving(true);
+    const payload: Record<string, unknown> = {
+      name: form.name,
+      endpoint: form.endpoint,
+      modelName: form.modelName,
+      isActive: form.isActive,
+      allowedCompanyIds: form.allowedCompanyIds,
+    };
+    // Only send apiKey if user explicitly chose to change it
+    if (form.changeApiKey) {
+      payload.apiKey = form.apiKey.trim() || null; // empty string → null (clear the key)
+    }
+
     const res = await fetch(`/api/ai-config/${config.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify(form),
+      body: JSON.stringify(payload),
     });
     const json = await res.json();
     if (json.success) {
@@ -76,6 +108,16 @@ export function ConfigCard({ config, accessToken, onUpdated }: ConfigCardProps) 
     setSaving(false);
   };
 
+  const allowedLabel = (() => {
+    if (!config.allowedCompanyIds) return 'Tất cả công ty';
+    const ids = config.allowedCompanyIds as string[];
+    if (ids.length === 0) return 'Tất cả công ty';
+    const names = ids
+      .map((id) => companies.find((c) => c.id === id)?.name ?? id)
+      .join(', ');
+    return names;
+  })();
+
   return (
     <div className={`border rounded-xl p-5 bg-white space-y-4 ${!config.isActive ? 'opacity-60' : ''}`}>
       {/* Header */}
@@ -84,7 +126,7 @@ export function ConfigCard({ config, accessToken, onUpdated }: ConfigCardProps) 
           <span className={`w-2.5 h-2.5 rounded-full ${testResult ? (testResult.success ? 'bg-green-500' : 'bg-red-500') : config.isActive ? 'bg-yellow-400' : 'bg-gray-300'}`} />
           <div>
             <h3 className="font-semibold text-gray-900">{config.name}</h3>
-            <p className="text-xs text-muted-foreground">{config.endpoint}</p>
+            <p className="text-xs text-muted-foreground font-mono">{config.endpoint}</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -104,10 +146,19 @@ export function ConfigCard({ config, accessToken, onUpdated }: ConfigCardProps) 
         </div>
       </div>
 
-      {/* Current model */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">Model hiện tại:</span>
-        <code className="text-xs bg-gray-100 px-2 py-0.5 rounded">{config.modelName}</code>
+      {/* Meta info row */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="text-xs text-muted-foreground">
+          Model: <code className="bg-gray-100 px-1.5 py-0.5 rounded">{config.modelName}</code>
+        </span>
+        <span className="text-xs text-muted-foreground">
+          API key: {config.apiKey
+            ? <span className="text-green-700 font-medium">Đã cấu hình</span>
+            : <span className="text-gray-400">Không dùng</span>}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          Phạm vi: <span className="text-gray-700">{allowedLabel}</span>
+        </span>
       </div>
 
       {/* Test result */}
@@ -133,8 +184,8 @@ export function ConfigCard({ config, accessToken, onUpdated }: ConfigCardProps) 
 
       {/* Edit modal */}
       {editing && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md space-y-4">
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg space-y-4 max-h-[90vh] overflow-y-auto">
             <h3 className="font-semibold">Chỉnh sửa: {config.name}</h3>
             <div className="space-y-3">
               <div>
@@ -181,6 +232,69 @@ export function ConfigCard({ config, accessToken, onUpdated }: ConfigCardProps) 
                   <p className="text-xs text-muted-foreground mt-1">Test kết nối để xem danh sách models thực tế</p>
                 )}
               </div>
+
+              {/* API Key section */}
+              <div className="border rounded p-3 space-y-2 bg-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-600">
+                    API Key hiện tại:{' '}
+                    {config.apiKey
+                      ? <span className="text-green-700 font-medium">Đã cấu hình</span>
+                      : <span className="text-gray-400">Chưa có</span>}
+                  </span>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-xs text-blue-600">
+                    <input
+                      type="checkbox"
+                      checked={form.changeApiKey}
+                      onChange={(e) => setForm({ ...form, changeApiKey: e.target.checked, apiKey: '' })}
+                      className="rounded"
+                    />
+                    Thay đổi API key
+                  </label>
+                </div>
+                {form.changeApiKey && (
+                  <div>
+                    <input
+                      type="password"
+                      value={form.apiKey}
+                      onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+                      className="w-full border rounded px-3 py-2 text-sm font-mono bg-white"
+                      placeholder="Nhập API key mới (để trống = xóa key hiện tại)"
+                      autoComplete="new-password"
+                    />
+                    {form.apiKey === '' && (
+                      <p className="text-xs text-amber-600 mt-1">Để trống sẽ xóa API key hiện tại</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Company access list */}
+              {isGroupAdmin && companies.length > 0 && (
+                <div>
+                  <label className="text-xs text-gray-600 block mb-1">
+                    Công ty được phép sử dụng
+                    <span className="text-gray-400 ml-1">(bỏ chọn tất cả = mọi công ty)</span>
+                  </label>
+                  <div className="border rounded p-2 max-h-40 overflow-y-auto space-y-1 bg-white">
+                    {companies.map((c) => (
+                      <label key={c.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                        <input
+                          type="checkbox"
+                          checked={(form.allowedCompanyIds ?? []).includes(c.id)}
+                          onChange={() => toggleCompany(c.id)}
+                          className="rounded"
+                        />
+                        <span className="text-sm">{c.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {form.allowedCompanyIds === null && (
+                    <p className="text-xs text-blue-600 mt-1">Tất cả công ty đều được phép dùng cấu hình này</p>
+                  )}
+                </div>
+              )}
+
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"

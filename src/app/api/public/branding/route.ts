@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getPresignedDownloadUrl } from '@/lib/minio';
 
 /**
  * GET /api/public/branding — no auth required.
  * Returns the branding settings of the primary group/root organization.
  * Used by the login page to show configurable title, logo, and background.
+ *
+ * Images are served via /api/public/image?key=<objectName> proxy so they
+ * work even when MinIO port 9000 is not exposed to the internet.
  */
 export async function GET() {
   try {
@@ -18,16 +20,20 @@ export async function GET() {
 
     const meta = (rootOrg?.metadata as Record<string, string> | null) ?? {};
 
-    // If logo was uploaded to MinIO, regenerate a fresh presigned URL so it
-    // never expires regardless of when the logo was originally uploaded.
-    let logoUrl: string | null = meta.logoUrl ?? null;
+    // Logo: use proxy endpoint so browsers don't need direct MinIO access (port 9000)
+    let logoUrl: string | null = null;
     if (meta.logoObjectName) {
-      try {
-        logoUrl = await getPresignedDownloadUrl(meta.logoObjectName, 7 * 24 * 3600);
-      } catch {
-        // Fall back to stored URL if MinIO is unavailable
-        logoUrl = meta.logoUrl ?? null;
-      }
+      logoUrl = `/api/public/image?key=${encodeURIComponent(meta.logoObjectName)}`;
+    } else if (meta.logoUrl) {
+      logoUrl = meta.logoUrl; // legacy: external URL
+    }
+
+    // Background: use proxy if uploaded to MinIO, else use stored URL (external URL)
+    let loginBgUrl: string | null = null;
+    if (meta.loginBgObjectName) {
+      loginBgUrl = `/api/public/image?key=${encodeURIComponent(meta.loginBgObjectName)}`;
+    } else if (meta.loginBgUrl) {
+      loginBgUrl = meta.loginBgUrl;
     }
 
     return NextResponse.json({
@@ -35,7 +41,7 @@ export async function GET() {
       data: {
         loginTitle: meta.loginTitle ?? meta.companyName ?? rootOrg?.name ?? 'LMS Tập đoàn',
         loginSubtitle: meta.loginSubtitle ?? 'Đăng nhập để tiếp tục',
-        loginBgUrl: meta.loginBgUrl ?? null,
+        loginBgUrl,
         loginBgColor: meta.loginBgColor ?? null,
         logoUrl,
         primaryColor: meta.primaryColor ?? '#1a56db',

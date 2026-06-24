@@ -111,20 +111,8 @@ export function VideoPlayer({
       html5: {
         vhs: {
           overrideNative: true,
-          // Add auth header for requests to our own /api/ endpoints (e.g. manifest proxy).
-          // MinIO presigned URLs ignore unknown headers, so this is safe for segment requests too.
-          xhr: {
-            beforeRequest: (options: Record<string, unknown>) => {
-              const uri = (options.uri as string) ?? '';
-              if (uri.startsWith('/api/') || uri.includes(window.location.hostname)) {
-                options.headers = {
-                  ...(options.headers as Record<string, string>),
-                  Authorization: `Bearer ${accessToken}`,
-                };
-              }
-              return options;
-            },
-          },
+          // Manifest endpoint is public (UUID-protected + presigned segment URLs).
+          // No auth header needed for HLS requests.
         },
         nativeVideoTracks: false,
         nativeAudioTracks: false,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withRole } from '@/middleware/require-role';
-import { minioClient, BUCKET_PRIVATE } from '@/lib/minio';
+import { minioClient, BUCKET_PRIVATE, getPresignedDownloadUrl } from '@/lib/minio'; // minioClient for putObject
 import { prisma } from '@/lib/prisma';
 import { handleApiError } from '@/app/api/error-handler';
 import { ForbiddenError, NotFoundError } from '@/lib/errors';
@@ -54,8 +54,8 @@ export const POST = withRole(
         'Content-Type': file.type,
       });
 
-      // Presigned URL 5 năm (thumbnail ít thay đổi)
-      const url = await minioClient.presignedGetObject(BUCKET_PRIVATE, objectName, 5 * 365 * 24 * 3600);
+      // Presigned URL 7 ngày (max MinIO cho phép).
+      const url = await getPresignedDownloadUrl(objectName, 7 * 24 * 3600);
 
       // Cập nhật thumbnailUrl trên Course
       await prisma.course.update({

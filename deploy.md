@@ -3,6 +3,156 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-06-25 00:30] Fix 4 issues: file upload wizard, tạo admin công ty, nút chỉnh sửa, nhóm học tập
+
+**Loại:** fix + feature
+
+**Các thay đổi:**
+
+### 1. AI Course Wizard — upload tài liệu tham khảo
+- `src/components/wizard/step-course-info.tsx`: Thay textarea đơn thuần bằng khu vực kéo-thả + nút "chọn từ máy tính". Hỗ trợ TXT (đọc trực tiếp trên browser), PDF và DOCX (gọi server). Hiển thị badge tên file sau khi trích xuất, trạng thái loading, thông báo lỗi inline.
+- `src/app/api/wizard/extract-text/route.ts` **Tạo mới**: POST endpoint trích xuất text từ file. TXT → UTF-8. PDF → pdfjs-dist (legacy Node.js). DOCX → parse ZIP với `inflateRawSync` + strip XML tags.
+
+### 2. Tạo công ty + tài khoản admin
+- `src/app/(dashboard)/organizations/page.tsx`: Sau khi group_admin tạo công ty → hiển thị step-2 modal "Tạo tài khoản quản trị". Sinh mật khẩu ngẫu nhiên, gửi email. Nút "Bỏ qua" để tạo sau.
+- `src/app/api/organizations/[id]/admin/route.ts` **Tạo mới**: POST tạo user company_admin, sinh password, hash bcrypt, UserRole, gửi welcome email async.
+
+### 3. Nút Chỉnh sửa tổ chức không phản hồi
+- `src/app/(dashboard)/organizations/[id]/page.tsx`: Click "Chỉnh sửa" → `setActiveTab('info')` đồng thời để form luôn hiện. Thay `alert()`/`confirm()` bằng `toast()`. Thêm `removingRoleId` loading state.
+
+### 4. Nhóm học tập ẩn với company_admin
+- `src/app/(dashboard)/layout.tsx`: Thêm `company_admin`, `hr_manager` vào roles của `/learning-groups`.
+
+**Kết quả:**
+- `npm run build` thành công, `pm2 restart lms-web` online
+
+**Lưu ý / Rủi ro:**
+- PDF extraction: nếu PDF scan (ảnh) thì text trống — khuyến nghị dùng PDF có layer text
+- DOCX extraction không hỗ trợ table content phức tạp
+- Admin creation gửi email async — nếu SMTP chưa cấu hình, user vẫn được tạo
+
+## [2026-06-24] Fix AI config: test kết nối hỗ trợ OpenAI-compatible API
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/ai-config.service.ts` — `testAiConnection` và `getAvailableModels` trước đó hardcode `/api/tags` (Ollama-only). Thêm helper `probeEndpoint` tự động thử `/api/tags` (Ollama) trước, nếu thất bại thử `/models` (OpenAI-compatible). Hỗ trợ cả 2 kiểu response: `{models:[{name}]}` (Ollama) và `{data:[{id}]}` (OpenAI)
+
+**Kết quả:**
+- Test kết nối với endpoint OpenAI-compatible (VNG Cloud, Azure, v.v.) hoạt động đúng
+- `npm run build` → ✓ compiled successfully
+- `pm2 restart lms-web` → online
+
+## [2026-06-24] Fix AI config: group_admin thấy tất cả config, hiển thị chọn công ty, sửa logo upload
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/(dashboard)/ai-config/page.tsx` — Sửa `isGroupAdmin` check: client-side `user.roles` là array of objects `{role, organizationId, organizationName}[]`, không phải `string[]`. Phải dùng `.map(r => r.role).includes(...)` giống settings/page.tsx. Hệ quả: menu chọn công ty nay hiển thị đúng với group_admin
+- `src/app/api/ai-config/route.ts` — GET handler: truyền `isGroupAdmin` vào `getAiConfigs()` (trước đó không truyền nên group_admin không thấy config của công ty con)
+- `src/services/ai-config.service.ts` — `getAiConfigs`: khi `isGroupAdmin = true` bỏ qua filter companyId trong SQL → trả tất cả config trong DB
+- `src/app/api/upload/logo/route.ts` — Thay `getPresignedDownloadUrl()` bằng proxy URL `/api/public/image?key=...`. Loại bỏ lỗi `ExpiresParamError` và không cần expose port 9000
+- `src/app/api/organizations/[id]/logo/route.ts` — Tương tự: dùng proxy URL thay presigned URL
+
+**Kết quả:**
+- Group admin xem thấy toàn bộ AI config kể cả config được tạo bởi company admin
+- Mục "Công ty được phép sử dụng" hiển thị đúng với group_admin
+- Upload logo không còn lỗi ExpiresParamError
+- `npm run build` → ✓ compiled successfully
+- `pm2 restart lms-web` → online
+
+## [2026-06-24] Fix 4 issues: tiến độ, logo/background, AI config UI
+
+**Loại:** fix + feature
+
+**Các thay đổi:**
+- `src/services/enrollment.service.ts` — Sửa SQL tiến độ: thay `AVG(progressPct)` bằng correlated subquery `SUM/COUNT(all lessons)`, đảm bảo bài học chưa xem tính là 0% thay vì bị bỏ qua
+- `src/app/api/public/image/route.ts` — Tạo mới: proxy ảnh logo/background từ MinIO qua Next.js (không cần expose port 9000)
+- `src/app/api/public/branding/route.ts` — Dùng `/api/public/image?key=` thay vì presigned URL cho logo và background; đảm bảo ảnh hiển thị qua domain
+- `src/app/(dashboard)/settings/page.tsx` — Lưu `loginBgObjectName` vào metadata org khi upload background; load đúng field khi render
+- `prisma/schema.prisma` — Thêm field `allowedCompanyIds Json?` vào model `AiServiceConfig`
+- `src/services/ai-config.service.ts` — Thêm `allowedCompanyIds` vào schema + upsert; filter config theo công ty được phép
+- `src/app/(dashboard)/ai-config/page.tsx` — Thêm field API key (tùy chọn) và checkbox danh sách công ty vào modal tạo mới
+- `src/components/ai-config/config-card.tsx` — Thêm hiển thị trạng thái API key ("Đã cấu hình"/"Chưa có"), form thay đổi API key, và checkbox danh sách công ty vào modal chỉnh sửa
+
+**Kết quả:**
+- Tiến độ khóa học tính đúng: xem 1/5 video → 20%, không phải 100%
+- Logo và ảnh nền login hiển thị bình thường qua domain công khai
+- AI config: có thể nhập API key cho AI đối tác (OpenAI-compatible), giới hạn công ty được phép dùng từng config
+- `prisma db push` + `prisma generate` (stop PM2 trước) → thành công
+- `npm run build` → ✓ compiled successfully
+- `pm2 restart lms-web` → online
+
+**Lưu ý / Rủi ro:**
+- API key AI được lưu plain text trong DB (chưa encrypt) — chấp nhận được cho môi trường nội bộ, cần encrypt nếu đưa lên cloud
+- `allowedCompanyIds: null` = tất cả công ty được dùng (backward-compatible với config cũ)
+
+## [2026-06-24] Fix video không chạy qua domain — proxy HLS segment qua Next.js
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/api/assets/[id]/segment/[...segPath]/route.ts` *(file mới)*: Route proxy segment HLS. GET `/api/assets/[id]/segment/segment_000.ts` → fetch từ MinIO nội bộ → stream ra browser. Không cần auth (UUID bảo vệ đủ). Content-Type `video/mp2t`. Cache 1h.
+- `src/app/api/assets/[id]/manifest/route.ts`: Đổi rewrite từ presigned MinIO URLs sang `/api/assets/[id]/segment/[filename]`. Lý do: MinIO port 9000 không expose ra internet — browser truy cập qua domain không kết nối được trực tiếp. Proxy qua Next.js (port 80/443) giải quyết triệt để.
+
+**Kết quả:**
+- `npm run build` thành công, `pm2 restart lms-web` → online
+- manifest trả `segment URL: /api/assets/.../segment/segment_000.ts`
+- segment proxy: **200 OK, 306 KB** — video chạy được hoàn toàn qua domain
+
+**Lưu ý / Rủi ro:**
+- Segment traffic đi qua Node.js process thay vì trực tiếp MinIO → tốn thêm CPU/RAM server. Với số lượng user nhỏ đây không phải vấn đề. Nếu scale lớn sau này có thể dùng nginx proxy MinIO hoặc CDN.
+
+## [2026-06-24] Fix SSR crash DOMMatrix + dynamic import VideoPlayer/PdfViewer
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/(dashboard)/my-courses/[id]/lessons/[lessonId]/page.tsx`: Đổi import tĩnh `VideoPlayer` và `PdfViewer` sang `dynamic(..., { ssr: false })`. Lý do: `pdfjs-dist` và `video.js` dùng `DOMMatrix` và các browser-only API — khi Next.js SSR trang này sẽ crash với `ReferenceError: DOMMatrix is not defined`. Dynamic import với `ssr: false` ngăn các library này load ở server. Bundle lesson page giảm từ 329 kB → 4.84 kB.
+
+**Kết quả:**
+- `npm run build` thành công
+- `pm2 restart lms-web` → status online
+- Không còn lỗi DOMMatrix trong logs
+- Test end-to-end: Login → stream-url → manifest → segment 200 OK — video hoạt động
+
+**Lưu ý / Rủi ro:**
+- VideoPlayer và PdfViewer sẽ hiện loading placeholder trong ~1s khi trang load lần đầu (vì lazy load JS). Đây là trade-off chấp nhận được.
+
+## [2026-06-24] Fix MinIO presigned URL 403 — dùng public endpoint để ký URL
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/lib/minio.ts`: Thêm `minioPresignClient` — MinIO client dùng public endpoint (`MINIO_PUBLIC_URL`) thay vì internal `localhost`. Lý do: AWS4 presigned URL ký `Host` header. Nếu ký với `localhost:9000` nhưng browser gọi tới `lms.phuthaiholdings.com:9000`, host không khớp → 403 SignatureDoesNotMatch. Giải pháp: ký với public endpoint để host signature khớp với request của browser. Bỏ `rewriteToPublic()` vì không còn cần thiết.
+
+**Kết quả:**
+- `npm run build` thành công
+- `pm2 restart lms-web` → status online
+- Test end-to-end với user `nam.dv@phuthaiholdings.com`: Login OK → stream-url OK → manifest 200 → segment fetch 200 → Video load được
+
+**Lưu ý / Rủi ro:**
+- `minioPresignClient` kết nối tới public endpoint (`lms.phuthaiholdings.com:9000`) để ký URL. Nếu domain không resolve được từ server → fallback sang internal client (khi không có MINIO_PUBLIC_URL).
+- `minioClient` (internal) vẫn dùng cho tất cả object operations (get, put, copy, delete).
+
+## [2026-06-24] Fix video HLS không load + fix ExpiresParamError thumbnail
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/api/assets/[id]/manifest/route.ts`: Bỏ `withAuth` middleware — manifest endpoint không cần Bearer token. UUID của asset là đủ bảo mật; segment URLs là presigned (hết hạn sau 2h). Root cause: VHS `xhr.beforeRequest` trong player options không hoạt động → request manifest không có Authorization header → 401 → "HLS playlist request error".
+- `src/components/lesson/VideoPlayer.tsx`: Bỏ config `xhr.beforeRequest` không hoạt động trong player options. Manifest endpoint giờ là public nên không cần.
+- `src/app/api/courses/[id]/thumbnail/route.ts`: Sửa TTL presigned URL thumbnail từ `5 * 365 * 24 * 3600` (5 năm, vượt giới hạn MinIO) → `7 * 24 * 3600` (7 ngày, max MinIO). Dùng `getPresignedDownloadUrl` thay vì gọi trực tiếp `minioClient.presignedGetObject`.
+
+**Kết quả:**
+- `npm run build` thành công
+- `pm2 restart lms-web` → status online
+- Video HLS sẽ load được khi học viên play
+
+**Lưu ý / Rủi ro:**
+- Thumbnail presigned URL hết hạn sau 7 ngày — cần upload lại hoặc implement auto-refresh sau. objectName nên được lưu riêng để tái tạo URL.
+- Manifest endpoint không có auth — ai biết UUID của asset đều lấy được manifest (nhưng không có session ID MinIO để access bucket trực tiếp).
+
 ## [2026-06-24 00:30] Fix quiz template download + thêm CSV import cho Question Bank
 
 **Loại:** fix + feature

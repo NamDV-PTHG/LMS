@@ -2,8 +2,10 @@ import * as Minio from 'minio';
 
 const globalForMinio = globalThis as unknown as {
   minioClient: Minio.Client | undefined;
+  minioPresignClient: Minio.Client | undefined;
 };
 
+/** Internal client — used for all object operations (get, put, delete, stat). */
 function createMinioClient(): Minio.Client {
   return new Minio.Client({
     endPoint: process.env.MINIO_ENDPOINT ?? 'localhost',
@@ -14,29 +16,43 @@ function createMinioClient(): Minio.Client {
   });
 }
 
+/**
+ * Public client — used ONLY for generating presigned URLs.
+ *
+ * AWS4 presigned URLs include the Host in the signature scope. If the URL is
+ * generated with the internal host (localhost) but served to browsers via a
+ * public host, the Host header won't match → 403 SignatureDoesNotMatch.
+ *
+ * Fix: sign presigned URLs using the public endpoint so the Host in the
+ * signature matches the Host the browser sends.
+ *
+ * Set MINIO_PUBLIC_URL=http://lms.example.com:9000 in .env.
+ * Falls back to the internal client if MINIO_PUBLIC_URL is not set.
+ */
+function createMinioPresignClient(): Minio.Client {
+  const publicUrl = process.env.MINIO_PUBLIC_URL;
+  if (!publicUrl) return createMinioClient();
+
+  const u = new URL(publicUrl);
+  const port = u.port ? parseInt(u.port, 10) : (u.protocol === 'https:' ? 443 : 80);
+  return new Minio.Client({
+    endPoint: u.hostname,
+    port,
+    useSSL: u.protocol === 'https:',
+    accessKey: process.env.MINIO_ACCESS_KEY ?? 'minioadmin',
+    secretKey: process.env.MINIO_SECRET_KEY ?? 'minioadmin',
+  });
+}
+
 export const minioClient =
   globalForMinio.minioClient ?? createMinioClient();
 
-if (process.env.NODE_ENV !== 'production') globalForMinio.minioClient = minioClient;
+const minioPresignClient =
+  globalForMinio.minioPresignClient ?? createMinioPresignClient();
 
-/**
- * Rewrite presigned URL host/protocol to the public-facing MinIO address.
- * MinIO generates URLs using its internal endpoint (localhost), but browsers
- * need to reach MinIO via the public hostname. We swap the origin only —
- * the signature and path stay intact (they're not bound to the host string).
- *
- * Set MINIO_PUBLIC_URL=http://your-server:9000 in .env to enable.
- * If not set, the internal URL is returned as-is (works for localhost access).
- */
-function rewriteToPublic(internalUrl: string): string {
-  const publicUrl = process.env.MINIO_PUBLIC_URL;
-  if (!publicUrl) return internalUrl;
-  const internal = new URL(internalUrl);
-  const pub = new URL(publicUrl);
-  internal.protocol = pub.protocol;
-  internal.hostname = pub.hostname;
-  internal.port = pub.port;
-  return internal.toString();
+if (process.env.NODE_ENV !== 'production') {
+  globalForMinio.minioClient = minioClient;
+  globalForMinio.minioPresignClient = minioPresignClient;
 }
 
 export const BUCKET_PRIVATE = process.env.MINIO_BUCKET_PRIVATE ?? 'lms-private';
@@ -47,26 +63,24 @@ export const SIGNED_URL_TTL = parseInt(process.env.SIGNED_URL_TTL_MINUTES ?? '20
 
 /**
  * Generate a presigned PUT URL for client-side upload to temp bucket.
- * The URL host is rewritten to MINIO_PUBLIC_URL so browsers can reach it.
+ * Uses the public MinIO endpoint so the signed Host matches what browsers send.
  */
 export async function getPresignedUploadUrl(
   objectName: string,
   ttlSeconds = 15 * 60,
 ): Promise<string> {
-  const url = await minioClient.presignedPutObject(BUCKET_TEMP, objectName, ttlSeconds);
-  return rewriteToPublic(url);
+  return minioPresignClient.presignedPutObject(BUCKET_TEMP, objectName, ttlSeconds);
 }
 
 /**
  * Generate a presigned GET URL for streaming/viewing private asset.
- * The URL host is rewritten to MINIO_PUBLIC_URL so browsers can reach it.
+ * Uses the public MinIO endpoint so the signed Host matches what browsers send.
  */
 export async function getPresignedDownloadUrl(
   objectName: string,
   ttlSeconds = SIGNED_URL_TTL,
 ): Promise<string> {
-  const url = await minioClient.presignedGetObject(BUCKET_PRIVATE, objectName, ttlSeconds);
-  return rewriteToPublic(url);
+  return minioPresignClient.presignedGetObject(BUCKET_PRIVATE, objectName, ttlSeconds);
 }
 
 /**

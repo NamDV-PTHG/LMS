@@ -120,13 +120,20 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
       ac.source, ac.deadline, ac."isMandatory",
       e.id AS "enrollmentId",
       e."completedAt",
-      COALESCE(
-        AVG(lp."progressPct"),
-        0
+      -- Tính tiến độ dựa trên TẤT CẢ bài học trong khóa học (kể cả chưa học = 0%)
+      -- AVG chỉ tính trung bình các bài ĐÃ có record → sai khi chỉ học 1/10 bài
+      (
+        SELECT CASE WHEN COUNT(l.id) = 0 THEN 0
+               ELSE COALESCE(SUM(lp2."progressPct"), 0)::float / COUNT(l.id)
+               END
+        FROM "Section" s
+        JOIN "Lesson" l ON l."sectionId" = s.id
+        LEFT JOIN "LessonProgress" lp2
+          ON lp2."lessonId" = l.id AND lp2."enrollmentId" = e.id
+        WHERE s."courseId" = ac.id
       ) AS "progressPercent"
     FROM all_courses ac
     LEFT JOIN "Enrollment" e ON e."courseId" = ac.id AND e."userId" = ${userId}
-    LEFT JOIN "LessonProgress" lp ON lp."enrollmentId" = e.id
     WHERE ac.rn = 1
     GROUP BY
       ac.id, ac.title, ac.description, ac."thumbnailUrl", ac."estimatedHours",

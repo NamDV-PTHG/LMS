@@ -14,7 +14,7 @@ const getRole = (r: unknown): string =>
 const NAV_LINKS = [
   { href: '/dashboard',             label: 'Dashboard',           roles: ['group_admin','group_hrm','company_admin','hr_manager','instructor','learner'] },
   { href: '/reports',               label: 'Báo cáo',             roles: ['group_admin','group_hrm','company_admin','hr_manager'] },
-  { href: '/learning-groups',       label: 'Nhóm học tập',        roles: ['group_admin','group_hrm'] },
+  { href: '/learning-groups',       label: 'Nhóm học tập',        roles: ['group_admin','group_hrm','company_admin','hr_manager'] },
   { href: '/competency-frameworks', label: 'Khung năng lực',      roles: ['group_admin','group_hrm','company_admin'] },
   { href: '/learning-paths',        label: 'Lộ trình học',        roles: ['group_admin','group_hrm','company_admin'] },
   { href: '/positions',             label: 'Vị trí',              roles: ['group_admin','group_hrm','company_admin'] },

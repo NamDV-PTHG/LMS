@@ -6,7 +6,8 @@ import { ValidationError } from '@/lib/errors';
 
 export const GET = withRole(['group_admin', 'company_admin'], async (_req, { user, companyId }) => {
   try {
-    const configs = await getAiConfigs(companyId);
+    const isGroupAdmin = user.roles.includes('group_admin');
+    const configs = await getAiConfigs(companyId, isGroupAdmin);
     return NextResponse.json({ success: true, data: configs });
   } catch (err) {
     return handleApiError(err);

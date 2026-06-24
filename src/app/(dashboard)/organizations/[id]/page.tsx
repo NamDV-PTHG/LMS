@@ -127,11 +127,12 @@ export default function OrgDetailPage() {
       if (res.success) {
         setOrg({ ...org!, ...res.data });
         setEditing(false);
+        toast('success', 'Đã cập nhật thông tin tổ chức');
       } else {
-        alert(res.error ?? 'Lỗi cập nhật');
+        toast('error', res.error ?? 'Lỗi cập nhật');
       }
     } catch {
-      alert('Lỗi kết nối');
+      toast('error', 'Lỗi kết nối server');
     } finally {
       setSaving(false);
     }
@@ -185,8 +186,9 @@ export default function OrgDetailPage() {
     }
   };
 
+  const [removingRoleId, setRemovingRoleId] = useState<string | null>(null);
   const handleRemoveRole = async (userId: string, roleId: string) => {
-    if (!confirm('Xóa phân quyền này?')) return;
+    setRemovingRoleId(roleId);
     try {
       const res = await fetch(`/api/users/${userId}/roles/${roleId}`, {
         method: 'DELETE',
@@ -194,11 +196,14 @@ export default function OrgDetailPage() {
       }).then((r) => r.json());
       if (res.success) {
         loadUsers();
+        toast('success', 'Đã xóa phân quyền');
       } else {
-        alert(res.error ?? 'Lỗi xóa phân quyền');
+        toast('error', res.error ?? 'Lỗi xóa phân quyền');
       }
     } catch {
-      alert('Lỗi kết nối');
+      toast('error', 'Lỗi kết nối');
+    } finally {
+      setRemovingRoleId(null);
     }
   };
 
@@ -277,7 +282,7 @@ export default function OrgDetailPage() {
         </div>
         {canEdit && !editing && (
           <button
-            onClick={() => setEditing(true)}
+            onClick={() => { setEditing(true); setActiveTab('info'); }}
             className="rounded-lg border px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Chỉnh sửa
@@ -435,10 +440,11 @@ export default function OrgDetailPage() {
                                     {canEdit && (
                                       <button
                                         onClick={() => handleRemoveRole(u.id, r.id)}
-                                        className="text-blue-400 hover:text-red-500 ml-0.5 leading-none"
+                                        disabled={removingRoleId === r.id}
+                                        className="text-blue-400 hover:text-red-500 ml-0.5 leading-none disabled:opacity-40"
                                         title="Xóa phân quyền"
                                       >
-                                        ×
+                                        {removingRoleId === r.id ? '…' : '×'}
                                       </button>
                                     )}
                                   </span>

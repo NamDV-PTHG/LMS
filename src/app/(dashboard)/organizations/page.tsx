@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@/components/providers/auth-provider';
+import { useToast } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -25,6 +26,7 @@ const ORG_TYPE_LABEL: Record<string, string> = {
 
 export default function OrganizationsPage() {
   const { accessToken, user } = useAuth();
+  const { toast } = useToast();
   const router = useRouter();
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,6 +45,14 @@ export default function OrganizationsPage() {
   });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Step 2: create company admin (shown after company is created)
+  const [createdOrgId, setCreatedOrgId] = useState<string | null>(null);
+  const [createdOrgName, setCreatedOrgName] = useState('');
+  const [showAdminStep, setShowAdminStep] = useState(false);
+  const [adminForm, setAdminForm] = useState({ email: '', fullName: '' });
+  const [savingAdmin, setSavingAdmin] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
 
   const getRole = (r: unknown): string =>
     typeof r === 'string' ? r : (r as { role: string }).role;
@@ -92,6 +102,16 @@ export default function OrganizationsPage() {
         setShowCreate(false);
         setForm({ name: '', code: '', type: 'company', parentId: '', address: '', phone: '', description: '' });
         load();
+        // After creating a company, offer to create admin user
+        if (form.type === 'company' && isGroupAdmin && res.data?.id) {
+          setCreatedOrgId(res.data.id);
+          setCreatedOrgName(res.data.name ?? form.name);
+          setAdminForm({ email: '', fullName: '' });
+          setAdminError(null);
+          setShowAdminStep(true);
+        } else {
+          toast('success', 'Tạo tổ chức thành công');
+        }
       } else {
         setSaveError(res.error ?? 'Lỗi tạo tổ chức');
       }
@@ -99,6 +119,31 @@ export default function OrganizationsPage() {
       setSaveError('Lỗi kết nối');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createdOrgId) return;
+    setAdminError(null);
+    setSavingAdmin(true);
+    try {
+      const res = await fetch(`/api/organizations/${createdOrgId}/admin`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(adminForm),
+      }).then((r) => r.json());
+      if (res.success) {
+        setShowAdminStep(false);
+        setCreatedOrgId(null);
+        toast('success', `Đã tạo tài khoản admin và gửi email đến ${adminForm.email}`);
+      } else {
+        setAdminError(res.error ?? 'Lỗi tạo tài khoản');
+      }
+    } catch {
+      setAdminError('Lỗi kết nối');
+    } finally {
+      setSavingAdmin(false);
     }
   };
 
@@ -312,6 +357,66 @@ export default function OrganizationsPage() {
                   className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                 >
                   {saving ? 'Đang lưu...' : 'Tạo tổ chức'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Step 2: Create company admin */}
+      {showAdminStep && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-xl">
+            <div className="px-6 py-5 border-b">
+              <h2 className="font-semibold text-gray-900">Tạo tài khoản quản trị</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Công ty <strong>{createdOrgName}</strong> đã được tạo. Tạo tài khoản admin để quản lý công ty này.
+              </p>
+            </div>
+            <form onSubmit={handleCreateAdmin} className="p-6 space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800">
+                Hệ thống sẽ tự động gửi email thông tin đăng nhập đến địa chỉ email bên dưới.
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Họ và tên <span className="text-red-500">*</span></label>
+                <input
+                  value={adminForm.fullName}
+                  onChange={(e) => setAdminForm({ ...adminForm, fullName: e.target.value })}
+                  required
+                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Nguyễn Văn A"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email <span className="text-red-500">*</span></label>
+                <input
+                  type="email"
+                  value={adminForm.email}
+                  onChange={(e) => setAdminForm({ ...adminForm, email: e.target.value })}
+                  required
+                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="admin@congty.vn"
+                />
+              </div>
+              {adminError && (
+                <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{adminError}</p>
+              )}
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowAdminStep(false); setCreatedOrgId(null); toast('success', 'Đã tạo công ty. Bạn có thể tạo admin sau từ trang tổ chức.'); }}
+                  className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Bỏ qua
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingAdmin}
+                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {savingAdmin ? 'Đang tạo...' : 'Tạo & gửi email'}
                 </button>
               </div>
             </form>

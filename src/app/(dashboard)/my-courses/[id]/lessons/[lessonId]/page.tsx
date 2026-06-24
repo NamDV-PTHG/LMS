@@ -2,10 +2,20 @@
 
 import { useAuth } from '@/components/providers/auth-provider';
 import { useToast } from '@/components/ui/toast';
-import { VideoPlayer } from '@/components/lesson/VideoPlayer';
-import { PdfViewer } from '@/components/lesson/PdfViewer';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
+
+// ssr: false — cả video.js lẫn pdfjs-dist dùng browser-only APIs (DOMMatrix v.v.)
+// nên không thể render ở server. Dynamic import tránh crash SSR.
+const VideoPlayer = dynamic(
+  () => import('@/components/lesson/VideoPlayer').then((m) => m.VideoPlayer),
+  { ssr: false, loading: () => <div className="bg-black aspect-video rounded-xl flex items-center justify-center text-gray-400 text-sm">Đang tải player...</div> },
+);
+const PdfViewer = dynamic(
+  () => import('@/components/lesson/PdfViewer').then((m) => m.PdfViewer),
+  { ssr: false, loading: () => <div className="bg-gray-100 rounded-xl h-64 flex items-center justify-center text-gray-400 text-sm">Đang tải viewer...</div> },
+);
 import { useEffect, useState } from 'react';
 
 interface QuizQuestion {
@@ -41,7 +51,6 @@ export default function LessonPlayerPage() {
   const { accessToken, user } = useAuth();
   const { toast } = useToast();
   const { id: courseId, lessonId } = useParams<{ id: string; lessonId: string }>();
-  const router = useRouter();
 
   const [lesson, setLesson] = useState<LessonDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);

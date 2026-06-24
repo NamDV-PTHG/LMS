@@ -16,12 +16,13 @@ interface Organization {
 interface BrandingForm {
   logoUrl: string;
   logoObjectName: string;
+  loginBgUrl: string;
+  loginBgObjectName: string;
   companyName: string;
   themePreset: string;
   primaryColor: string;
   loginTitle: string;
   loginSubtitle: string;
-  loginBgUrl: string;
 }
 
 const THEME_PRESETS = [
@@ -38,12 +39,13 @@ const THEME_PRESETS = [
 const DEFAULT_BRANDING: BrandingForm = {
   logoUrl: '',
   logoObjectName: '',
+  loginBgUrl: '',
+  loginBgObjectName: '',
   companyName: '',
   themePreset: 'ocean',
   primaryColor: '#1a56db',
   loginTitle: 'LMS Tập đoàn',
   loginSubtitle: 'Đăng nhập để tiếp tục',
-  loginBgUrl: '',
 };
 
 export default function SettingsPage() {
@@ -163,12 +165,13 @@ export default function SettingsPage() {
           setBranding({
             logoUrl: m.logoUrl ?? '',
             logoObjectName: m.logoObjectName ?? '',
+            loginBgUrl: m.loginBgUrl ?? '',
+            loginBgObjectName: m.loginBgObjectName ?? '',
             companyName: m.companyName ?? '',
             themePreset: m.themePreset ?? 'ocean',
             primaryColor: m.primaryColor ?? '#1a56db',
             loginTitle: m.loginTitle ?? 'LMS Tập đoàn',
             loginSubtitle: m.loginSubtitle ?? 'Đăng nhập để tiếp tục',
-            loginBgUrl: m.loginBgUrl ?? '',
           });
         }
       })
@@ -190,7 +193,8 @@ export default function SettingsPage() {
         if (field === 'logoUrl') {
           setBranding((b) => ({ ...b, logoUrl: res.data.url, logoObjectName: res.data.objectName ?? '' }));
         } else {
-          setBranding((b) => ({ ...b, [field]: res.data.url }));
+          // Background: store objectName for proxy URL, and keep the MinIO URL as fallback
+          setBranding((b) => ({ ...b, loginBgUrl: res.data.url, loginBgObjectName: res.data.objectName ?? '' }));
         }
         toast('success', field === 'logoUrl' ? 'Upload logo thành công' : 'Upload ảnh nền thành công');
       } else {

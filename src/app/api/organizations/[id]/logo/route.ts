@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withRole } from '@/middleware/require-role';
-import { minioClient, BUCKET_PRIVATE, getPresignedDownloadUrl } from '@/lib/minio';
+import { minioClient, BUCKET_PRIVATE } from '@/lib/minio';
 import { prisma } from '@/lib/prisma';
 import { handleApiError } from '@/app/api/error-handler';
 import { ForbiddenError, NotFoundError } from '@/lib/errors';
@@ -61,9 +61,8 @@ export const POST = withRole(
         'Content-Type': resolvedMime,
       });
 
-      // Store objectName in metadata so branding API can regenerate presigned
-      // URL on each request (MinIO presigned URLs expire after max 7 days).
-      const logoUrl = await getPresignedDownloadUrl(objectName, 7 * 24 * 3600);
+      // Use proxy URL — avoids presign TTL issues and works without exposing port 9000
+      const logoUrl = `/api/public/image?key=${encodeURIComponent(objectName)}`;
 
       const currentMeta = (org.metadata as Record<string, unknown>) ?? {};
       await prisma.organization.update({

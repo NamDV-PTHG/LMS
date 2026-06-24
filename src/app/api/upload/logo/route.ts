@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withRole } from '@/middleware/require-role';
-import { minioClient, BUCKET_PRIVATE, getPresignedDownloadUrl } from '@/lib/minio';
+import { minioClient, BUCKET_PRIVATE } from '@/lib/minio';
 import { handleApiError } from '@/app/api/error-handler';
 
 /**
@@ -50,9 +50,9 @@ export const POST = withRole(
         'Content-Type': resolvedMime,
       });
 
-      // Return both a fresh 7-day URL (for immediate display) and objectName
-      // (to persist in DB so URLs can be regenerated after expiry).
-      const url = await getPresignedDownloadUrl(objectName, 7 * 24 * 3600);
+      // Return proxy URL for immediate display — avoids MinIO presign TTL limits
+      // and works regardless of whether port 9000 is exposed.
+      const url = `/api/public/image?key=${encodeURIComponent(objectName)}`;
       return NextResponse.json({ success: true, data: { url, objectName } });
     } catch (err) {
       return handleApiError(err);
