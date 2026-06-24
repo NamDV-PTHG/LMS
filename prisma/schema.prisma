@@ -1,0 +1,1019 @@
+// schema.prisma — LMS Tập đoàn v2.0
+// Source: LMS_MASTER_SPEC.md Section 4
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ORGANIZATION & USERS
+// ============================================================
+
+model Organization {
+  id           String   @id @default(uuid())
+  name         String
+  code         String
+  type         OrgType
+  parentId     String?
+  companyId    String?
+  displayOrder Int      @default(0)
+  description  String?
+  address      String?
+  phone        String?
+  isActive     Boolean  @default(true)
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  parent        Organization?  @relation("OrgHierarchy", fields: [parentId], references: [id])
+  children      Organization[] @relation("OrgHierarchy")
+  users         UserRole[]
+  courses       Course[]
+  assets        ContentAsset[]
+  positions     JobPosition[]  @relation("CompanyPositions")
+  deptPositions JobPosition[]  @relation("DeptPositions")
+  learningPaths LearningPath[]
+  frameworks    CompetencyFramework[]
+  policy              CompanyLearningPolicy?
+  groupMembers        GroupMember[]
+  receivedPublications CoursePublication[] @relation("ReceivedPublications")
+  smtpConfig           CompanySmtpConfig?  @relation("CompanySmtpConfig")
+
+  @@unique([code, companyId])
+  @@index([parentId])
+  @@index([companyId])
+}
+
+enum OrgType {
+  group
+  company
+  dept
+  team
+}
+
+model User {
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  passwordHash         String
+  fullName             String
+  avatarUrl            String?
+  employeeCode         String?   @unique
+  jobTitle             String?
+  jobLevel             String?
+  jobPositionId        String?
+  jobPositionChangedAt DateTime?
+  isActive             Boolean   @default(true)
+  isExternal           Boolean   @default(false)
+  mustChangePassword   Boolean   @default(false)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  roles              UserRole[]
+  enrollments        Enrollment[]
+  competencyProfiles UserCompetencyProfile[]
+  positionChanges    PositionChangeEvent[]   @relation("UserPositionChanges")
+  pathEnrollments    LearningPathEnrollment[]
+  jobPosition        JobPosition?            @relation(fields: [jobPositionId], references: [id])
+  uploadedAssets      ContentAsset[]
+  createdQuestions    Question[]
+  groupMemberships    GroupMember[]
+  positionChangesMade PositionChangeEvent[]   @relation("ChangedBy")
+  publishedCourses    CoursePublication[]     @relation("PublishedCourses")
+  assignedCourses     CourseAssignment[]      @relation("AssignedCourses")
+  contentRatings      ContentRating[]
+  passwordResetTokens PasswordResetToken[]
+}
+
+model UserRole {
+  id             String   @id @default(uuid())
+  userId         String
+  role           RoleType
+  organizationId String
+  assignedAt     DateTime @default(now())
+  assignedBy     String?
+
+  user         User         @relation(fields: [userId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([userId, role, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+}
+
+enum RoleType {
+  group_admin
+  group_hrm
+  company_admin
+  hr_manager
+  instructor
+  learner
+}
+
+// ============================================================
+// COURSES & CONTENT
+// ============================================================
+
+model Course {
+  id                  String         @id @default(uuid())
+  ownerCompanyId      String
+  createdById         String
+  title               String
+  description         String?
+  thumbnailUrl        String?
+  estimatedHours      Float?
+  completionMode      CompletionMode @default(ALL_LESSONS)
+  minimumPassingScore Int?
+  isPublished         Boolean        @default(false)
+  isActive            Boolean        @default(true)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  ownerCompany    Organization         @relation(fields: [ownerCompanyId], references: [id])
+  sections        CourseSection[]
+  enrollments     Enrollment[]
+  pathSteps       LearningPathStep[]
+  competencyLinks CompetencyCourseLink[]
+  groupCourses    GroupCourse[]
+  publications    CoursePublication[]
+  assignments     CourseAssignment[]
+}
+
+// Cơ chế ①: group_admin publish xuống công ty
+model CoursePublication {
+  id              String    @id @default(uuid())
+  courseId        String
+  targetCompanyId String
+  publishedById   String
+  deadline        DateTime?
+  isMandatory     Boolean   @default(false)
+  revokedAt       DateTime?
+  publishedAt     DateTime  @default(now())
+
+  course        Course       @relation(fields: [courseId], references: [id])
+  targetCompany Organization @relation("ReceivedPublications", fields: [targetCompanyId], references: [id])
+  publisher     User         @relation("PublishedCourses", fields: [publishedById], references: [id])
+
+  @@unique([courseId, targetCompanyId])
+  @@index([targetCompanyId])
+}
+
+// Cơ chế ③: company_admin / hr_manager assign nội bộ
+model CourseAssignment {
+  id              String    @id @default(uuid())
+  courseId        String
+  targetCompanyId String?
+  targetDeptId    String?
+  targetUserId    String?
+  assignedById    String
+  deadline        DateTime?
+  isMandatory     Boolean   @default(false)
+  assignedAt      DateTime  @default(now())
+
+  course       Course        @relation(fields: [courseId], references: [id])
+  assignedBy   User          @relation("AssignedCourses", fields: [assignedById], references: [id])
+
+  @@index([courseId])
+  @@index([targetUserId])
+  @@index([targetCompanyId])
+  @@index([targetDeptId])
+}
+
+enum CompletionMode {
+  ALL_LESSONS
+  REQUIRED_ONLY
+  QUIZ_PASS
+}
+
+model CourseSection {
+  id                 String   @id @default(uuid())
+  courseId           String
+  title              String
+  description        String?
+  displayOrder       Int
+  estimatedMinutes   Int?
+  deadlineOffsetDays Int?
+  isRequired         Boolean  @default(true)
+
+  course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons Lesson[]
+
+  @@unique([courseId, displayOrder])
+}
+
+model Lesson {
+  id                   String   @id @default(uuid())
+  sectionId            String
+  title                String
+  displayOrder         Int
+  contentType          String
+  estimatedMinutes     Int?
+  requiredMinutes      Int?
+  deadlineOffsetDays   Int?
+  availableAfterDays   Int?
+  isRequired           Boolean  @default(true)
+  prerequisiteLessonId String?
+
+  section            CourseSection      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  prerequisiteLesson Lesson?            @relation("LessonPrereq", fields: [prerequisiteLessonId], references: [id])
+  dependentLessons   Lesson[]           @relation("LessonPrereq")
+  progresses         LessonProgress[]
+  assets             ContentAsset[]
+  quizConfig         QuizConfig?
+  quizAttempts       QuizAttempt[]
+}
+
+// ============================================================
+// CONTENT ASSET & SECURITY
+// ============================================================
+
+model ContentAsset {
+  id               String          @id @default(uuid())
+  lessonId         String?
+  organizationId   String
+  uploadedById     String
+  title            String
+  description      String?
+  fileType         AssetType
+  storagePath      String
+  mimeType         String
+  fileSizeBytes    BigInt
+  durationSeconds  Int?
+  hlsPlaylistPath  String?
+  thumbnailPath    String?
+  downloadPolicy   DownloadPolicy  @default(BLOCKED)
+  watermarkEnabled Boolean         @default(true)
+  visibility       AssetVisibility @default(DEPT_ONLY)
+  processingStatus ProcessingStatus @default(PENDING)
+  isActive         Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  lesson         Lesson?            @relation(fields: [lessonId], references: [id])
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  uploader       User               @relation(fields: [uploadedById], references: [id])
+  accessLogs     AssetAccessLog[]
+  permissions    AssetPermission[]
+  watchEvents    VideoWatchEvent[]
+  docEvents      DocumentViewEvent[]
+  engagementStat AssetEngagementStat?
+  ratings        ContentRating[]
+}
+
+enum AssetType {
+  video
+  document
+  presentation
+  audio
+  image
+}
+
+enum DownloadPolicy {
+  ALLOWED
+  BLOCKED
+  WATERMARK_ONLY
+}
+
+enum AssetVisibility {
+  DEPT_ONLY
+  COMPANY_WIDE
+  GROUP_WIDE
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+model AssetPermission {
+  id             String    @id @default(uuid())
+  assetId        String
+  organizationId String
+  canView        Boolean   @default(false)
+  canDownload    Boolean   @default(false)
+  grantedById    String
+  grantedAt      DateTime  @default(now())
+  expiresAt      DateTime?
+
+  asset ContentAsset @relation(fields: [assetId], references: [id])
+
+  @@unique([assetId, organizationId])
+}
+
+model AssetAccessLog {
+  id        String       @id @default(uuid())
+  assetId   String
+  userId    String
+  action    AccessAction
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime     @default(now())
+
+  asset ContentAsset @relation(fields: [assetId], references: [id])
+
+  @@index([assetId, createdAt])
+  @@index([userId])
+}
+
+enum AccessAction {
+  view_request
+  stream_start
+  stream_heartbeat
+  download_attempt
+  download_success
+  signed_url_expired
+}
+
+// ============================================================
+// ENROLLMENT & PROGRESS
+// ============================================================
+
+model Enrollment {
+  id          String           @id @default(uuid())
+  userId      String
+  courseId    String
+  source      EnrollmentSource
+  sourceRefId String?
+  enrolledAt  DateTime         @default(now())
+  completedAt DateTime?
+  deadline    DateTime?
+  isMandatory Boolean          @default(false)
+
+  user             User                       @relation(fields: [userId], references: [id])
+  course           Course                     @relation(fields: [courseId], references: [id])
+  lessonProgresses LessonProgress[]
+  quizAttempts     QuizAttempt[]
+  certificate      Certificate?
+  stepEnrollment   LearningPathStepEnrollment?
+
+  @@unique([userId, courseId])
+  @@index([userId])
+  @@index([courseId])
+}
+
+enum EnrollmentSource {
+  group_publish
+  learning_group
+  company_assign
+  self
+}
+
+model LessonProgress {
+  id           String         @id @default(uuid())
+  enrollmentId String
+  lessonId     String
+  status       ProgressStatus @default(not_started)
+  progressPct  Float          @default(0)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  timeSpentSec Int            @default(0)
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  lesson     Lesson     @relation(fields: [lessonId], references: [id])
+
+  @@unique([enrollmentId, lessonId])
+}
+
+enum ProgressStatus {
+  not_started
+  in_progress
+  completed
+}
+
+model Certificate {
+  id           String    @id @default(uuid())
+  enrollmentId String    @unique
+  code         String    @unique @default(cuid())
+  issuedAt     DateTime  @default(now())
+  expiresAt    DateTime?
+  pdfUrl       String?
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id])
+}
+
+// ============================================================
+// TRACKING & ANALYTICS
+// ============================================================
+
+model VideoWatchEvent {
+  id               String     @id @default(uuid())
+  assetId          String
+  userId           String
+  enrollmentId     String?
+  sessionId        String
+  eventType        VideoEvent
+  watchPositionSec Int?
+  durationSec      Int?
+  playbackSpeed    Float      @default(1.0)
+  deviceType       String?
+  createdAt        DateTime   @default(now())
+
+  asset ContentAsset @relation(fields: [assetId], references: [id])
+
+  @@index([assetId, createdAt])
+  @@index([userId, assetId])
+}
+
+enum VideoEvent {
+  watch_start
+  heartbeat
+  pause
+  resume
+  seek
+  watch_end
+  replay
+  speed_change
+}
+
+model DocumentViewEvent {
+  id             String   @id @default(uuid())
+  assetId        String
+  userId         String
+  enrollmentId   String?
+  sessionId      String
+  eventType      DocEvent
+  pageNumber     Int?
+  totalPages     Int?
+  timeOnPageSec  Int?
+  scrollDepthPct Float?
+  createdAt      DateTime @default(now())
+
+  asset ContentAsset @relation(fields: [assetId], references: [id])
+
+  @@index([assetId, createdAt])
+}
+
+enum DocEvent {
+  open
+  page_view
+  page_leave
+  close
+  download_attempt
+}
+
+model AssetEngagementStat {
+  id               String   @id @default(uuid())
+  assetId          String   @unique
+  companyId        String
+  totalViews       Int      @default(0)
+  uniqueViewers    Int      @default(0)
+  avgWatchPctVideo Float?
+  avgPagesRead     Float?
+  completionRate   Float    @default(0)
+  replayRate       Float    @default(0)
+  avgRating        Float?
+  ratingCount      Int      @default(0)
+  dropOffPointSec  Int?
+  dropOffPageNumber Int?
+  lastCalculatedAt DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  asset ContentAsset @relation(fields: [assetId], references: [id])
+
+  @@index([companyId])
+}
+
+model ContentRating {
+  id           String   @id @default(uuid())
+  assetId      String
+  userId       String
+  enrollmentId String?
+  rating       Int
+  comment      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  asset ContentAsset @relation(fields: [assetId], references: [id])
+  user  User         @relation(fields: [userId], references: [id])
+
+  @@unique([assetId, userId])
+}
+
+// ============================================================
+// COMPETENCY FRAMEWORK & JOB POSITIONS
+// ============================================================
+
+model JobPosition {
+  id                    String   @id @default(uuid())
+  companyId             String
+  organizationId        String?
+  title                 String
+  level                 String?
+  code                  String?
+  description           String?
+  competencyFrameworkId String?
+  learningPathId        String?
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  company             Organization         @relation("CompanyPositions", fields: [companyId], references: [id])
+  organization        Organization?        @relation("DeptPositions", fields: [organizationId], references: [id])
+  competencyFramework CompetencyFramework? @relation(fields: [competencyFrameworkId], references: [id])
+  learningPath        LearningPath?        @relation(fields: [learningPathId], references: [id])
+  users               User[]
+  positionChangesFrom PositionChangeEvent[] @relation("FromPosition")
+  positionChangesTo   PositionChangeEvent[] @relation("ToPosition")
+
+  @@unique([companyId, code])
+  @@index([companyId])
+}
+
+model CompetencyFramework {
+  id          String    @id @default(uuid())
+  companyId   String
+  name        String
+  version     String    @default("1.0")
+  description String?
+  isActive    Boolean   @default(true)
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company   Organization       @relation(fields: [companyId], references: [id])
+  domains   CompetencyDomain[]
+  positions JobPosition[]
+
+  @@index([companyId])
+}
+
+model CompetencyDomain {
+  id           String   @id @default(uuid())
+  frameworkId  String
+  name         String
+  description  String?
+  displayOrder Int
+  weight       Float?
+
+  framework    CompetencyFramework @relation(fields: [frameworkId], references: [id])
+  competencies Competency[]
+
+  @@unique([frameworkId, displayOrder])
+}
+
+model Competency {
+  id                String @id @default(uuid())
+  domainId          String
+  name              String
+  description       String?
+  requiredLevel     Int
+  levelDescriptions Json
+  displayOrder      Int
+
+  domain       CompetencyDomain       @relation(fields: [domainId], references: [id])
+  userProfiles UserCompetencyProfile[]
+  courseLinks  CompetencyCourseLink[]
+
+  @@index([domainId])
+}
+
+model CompetencyCourseLink {
+  id           String @id @default(uuid())
+  competencyId String
+  courseId     String
+  targetLevel  Int
+
+  competency Competency @relation(fields: [competencyId], references: [id])
+  course     Course     @relation(fields: [courseId], references: [id])
+
+  @@unique([competencyId, courseId])
+}
+
+model UserCompetencyProfile {
+  id           String           @id @default(uuid())
+  userId       String
+  competencyId String
+  currentLevel Int              @default(0)
+  evidenceNote String?
+  assessedById String?
+  assessedAt   DateTime         @default(now())
+  source       AssessmentSource @default(SELF)
+  updatedAt    DateTime         @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id])
+  competency Competency @relation(fields: [competencyId], references: [id])
+
+  @@unique([userId, competencyId])
+  @@index([userId])
+}
+
+enum AssessmentSource {
+  SELF
+  MANAGER
+  QUIZ
+  SYSTEM
+}
+
+// ============================================================
+// LEARNING PATH
+// ============================================================
+
+model LearningPath {
+  id                String   @id @default(uuid())
+  companyId         String
+  name              String
+  description       String?
+  totalDeadlineDays Int?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  company     Organization             @relation(fields: [companyId], references: [id])
+  steps       LearningPathStep[]
+  positions   JobPosition[]
+  enrollments LearningPathEnrollment[]
+
+  @@index([companyId])
+}
+
+model LearningPathStep {
+  id                 String   @id @default(uuid())
+  learningPathId     String
+  courseId           String
+  stepOrder          Int
+  stepType           StepType @default(REQUIRED)
+  deadlineOffsetDays Int?
+  availableAfterDays Int?
+  estimatedHours     Float?
+  prerequisiteStepId String?
+
+  learningPath     LearningPath              @relation(fields: [learningPathId], references: [id])
+  course           Course                    @relation(fields: [courseId], references: [id])
+  prerequisiteStep LearningPathStep?         @relation("StepPrereq", fields: [prerequisiteStepId], references: [id])
+  dependentSteps   LearningPathStep[]        @relation("StepPrereq")
+  stepEnrollments  LearningPathStepEnrollment[]
+
+  @@unique([learningPathId, stepOrder])
+  @@index([learningPathId])
+}
+
+enum StepType {
+  REQUIRED
+  ELECTIVE
+  ADVANCED
+}
+
+model LearningPathEnrollment {
+  id                    String               @id @default(uuid())
+  userId                String
+  learningPathId        String
+  positionChangeEventId String?
+  enrollmentType        EnrollmentPathType   @default(MANUAL)
+  status                PathEnrollmentStatus @default(IN_PROGRESS)
+  startedAt             DateTime             @default(now())
+  totalDeadline         DateTime?
+  completedAt           DateTime?
+  progressPct           Float                @default(0)
+  approvedById          String?
+  approvedAt            DateTime?
+
+  user                User                        @relation(fields: [userId], references: [id])
+  learningPath        LearningPath                @relation(fields: [learningPathId], references: [id])
+  positionChangeEvent PositionChangeEvent?        @relation(fields: [positionChangeEventId], references: [id])
+  stepEnrollments     LearningPathStepEnrollment[]
+
+  @@unique([userId, learningPathId])
+  @@index([userId])
+}
+
+enum EnrollmentPathType {
+  POSITION_CHANGE
+  MANUAL
+  SELF
+}
+
+enum PathEnrollmentStatus {
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  PAUSED
+}
+
+model LearningPathStepEnrollment {
+  id                       String         @id @default(uuid())
+  learningPathEnrollmentId String
+  learningPathStepId       String
+  enrollmentId             String?        @unique
+  status                   ProgressStatus @default(not_started)
+  isUnlocked               Boolean        @default(false)
+  unlockedAt               DateTime?
+  deadline                 DateTime?
+  completedAt              DateTime?
+
+  pathEnrollment   LearningPathEnrollment @relation(fields: [learningPathEnrollmentId], references: [id])
+  step             LearningPathStep       @relation(fields: [learningPathStepId], references: [id])
+  courseEnrollment Enrollment?            @relation(fields: [enrollmentId], references: [id])
+
+  @@unique([learningPathEnrollmentId, learningPathStepId])
+}
+
+model PositionChangeEvent {
+  id                String               @id @default(uuid())
+  userId            String
+  fromPositionId    String?
+  toPositionId      String
+  changedById       String
+  changedAt         DateTime             @default(now())
+  effectiveDate     DateTime
+  status            PositionChangeStatus @default(PENDING_GAP_ANALYSIS)
+  gapAnalysisResult Json?
+  notes             String?
+
+  user            User                     @relation("UserPositionChanges", fields: [userId], references: [id])
+  changedBy       User                     @relation("ChangedBy", fields: [changedById], references: [id])
+  fromPosition    JobPosition?             @relation("FromPosition", fields: [fromPositionId], references: [id])
+  toPosition      JobPosition              @relation("ToPosition", fields: [toPositionId], references: [id])
+  pathEnrollments LearningPathEnrollment[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum PositionChangeStatus {
+  PENDING_GAP_ANALYSIS
+  GAP_ANALYZED
+  PENDING_APPROVAL
+  APPROVED
+  ENROLLED
+  COMPLETED
+}
+
+// ============================================================
+// LEARNING GROUP
+// ============================================================
+
+model LearningGroup {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  type        GroupType
+  ruleJson    Json?
+  createdById String
+  companyId   String?   // null = group-level (group_admin); set = company-scoped
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  members GroupMember[]
+  courses GroupCourse[]
+
+  @@index([companyId])
+}
+
+enum GroupType {
+  manual
+  rule_based
+  external
+}
+
+model GroupMember {
+  id        String    @id @default(uuid())
+  groupId   String
+  userId    String
+  companyId String
+  addedById String
+  addedAt   DateTime  @default(now())
+  removedAt DateTime?
+  isActive  Boolean   @default(true)
+
+  group   LearningGroup @relation(fields: [groupId], references: [id])
+  user    User          @relation(fields: [userId], references: [id])
+  company Organization  @relation(fields: [companyId], references: [id])
+
+  @@unique([groupId, userId])
+}
+
+model GroupCourse {
+  id           String    @id @default(uuid())
+  groupId      String
+  courseId     String
+  assignedById String
+  deadline     DateTime?
+  assignedAt   DateTime  @default(now())
+
+  group  LearningGroup @relation(fields: [groupId], references: [id])
+  course Course        @relation(fields: [courseId], references: [id])
+
+  @@unique([groupId, courseId])
+}
+
+// ============================================================
+// QUIZ & QUESTION BANK
+// ============================================================
+
+model QuestionBank {
+  id             String   @id @default(uuid())
+  ownerCompanyId String
+  name           String
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  questions       Question[]
+  sourceDocuments SourceDocument[]
+}
+
+model Question {
+  id            String       @id @default(uuid())
+  bankId        String
+  createdById   String
+  sourceDocId   String?      // which SourceDocument generated this (null = manual)
+  type          QuestionType
+  difficulty    Difficulty   @default(medium)
+  questionText  String
+  options       Json
+  correctAnswer String
+  explanation   String?
+  scorePoints   Int          @default(1)
+  tags          String[]
+  status        String       @default("draft") // draft | review | approved | rejected
+  reviewComment String?                         // reject reason
+  createdAt     DateTime     @default(now())
+
+  bank      QuestionBank    @relation(fields: [bankId], references: [id])
+  createdBy User            @relation(fields: [createdById], references: [id])
+  sourceDoc SourceDocument? @relation(fields: [sourceDocId], references: [id])
+
+  @@index([bankId, status])
+  @@index([bankId, difficulty])
+}
+
+// Source documents used for AI question generation
+model SourceDocument {
+  id             String     @id @default(uuid())
+  bankId         String
+  ownerCompanyId String
+  filename       String
+  mimeType       String
+  storagePath    String
+  extractedText  String?
+  status         DocStatus  @default(pending)
+  uploadedById   String
+  totalChunks    Int        @default(0)
+  processedChunks Int       @default(0)
+  questionsGenerated Int    @default(0)
+  errorMessage   String?
+  uploadedAt     DateTime   @default(now())
+  processedAt    DateTime?
+
+  bank       QuestionBank @relation(fields: [bankId], references: [id])
+  questions  Question[]
+}
+
+enum DocStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum QuestionType {
+  single_choice
+  multi_choice
+  true_false
+  fill_blank
+}
+
+enum Difficulty {
+  easy
+  medium
+  hard
+}
+
+// ── Quiz Configuration (per lesson) ──────────────────────────────
+model QuizConfig {
+  id               String   @id @default(uuid())
+  lessonId         String   @unique
+  bankIds          String[] // IDs of QuestionBank to draw from
+  totalQuestions   Int      @default(10)
+  easyCount        Int      @default(3)
+  mediumCount      Int      @default(5)
+  hardCount        Int      @default(2)
+  passingScore     Float    @default(70)
+  timeLimitMins    Int?     // null = no time limit
+  maxAttempts      Int      @default(3)
+  shuffleQuestions Boolean  @default(true)
+  shuffleOptions   Boolean  @default(true)
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+}
+
+model QuizAttempt {
+  id           String    @id @default(uuid())
+  enrollmentId String
+  lessonId     String
+  score        Float?
+  maxScore     Float?
+  passedAt     DateTime?
+  startedAt    DateTime  @default(now())
+  submittedAt  DateTime?
+  answers      Json?
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id])
+  lesson     Lesson     @relation(fields: [lessonId], references: [id])
+
+  @@index([enrollmentId, lessonId])
+}
+
+// ============================================================
+// IMPORT & POLICY
+// ============================================================
+
+model ImportJob {
+  id          String       @id @default(uuid())
+  companyId   String
+  importType  String
+  fileName    String
+  status      ImportStatus @default(PENDING)
+  totalRows   Int          @default(0)
+  successRows Int          @default(0)
+  errorRows   Int          @default(0)
+  errorLog    Json?
+  snapshot    Json?
+  createdById String
+  createdAt   DateTime     @default(now())
+  completedAt DateTime?
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  ROLLED_BACK
+}
+
+model CompanyLearningPolicy {
+  id                         String   @id @default(uuid())
+  companyId                  String   @unique
+  autoEnrollOnPositionChange Boolean  @default(false)
+  requireManagerApproval     Boolean  @default(true)
+  positionChangeGraceDays    Int      @default(7)
+  allowSelfAssessment        Boolean  @default(true)
+  reminderBeforeDeadlineDays Int[]    @default([14, 7, 1])
+
+  company Organization @relation(fields: [companyId], references: [id])
+}
+
+model AiServiceConfig {
+  id        String   @id @default(uuid())
+  companyId String?
+  name      String
+  endpoint  String
+  modelName String
+  apiKey    String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================
+// SYSTEM CONFIG
+// ============================================================
+
+model SmtpConfig {
+  id        String   @id @default("singleton")
+  host      String
+  port      Int      @default(587)
+  secure    Boolean  @default(false)
+  user      String
+  pass      String
+  fromName  String   @default("LMS Tập đoàn")
+  fromEmail String
+  updatedAt DateTime @updatedAt
+}
+
+model CompanySmtpConfig {
+  id          String   @id @default(uuid())
+  companyId   String   @unique
+  host        String
+  port        Int      @default(587)
+  secure      Boolean  @default(false)
+  user        String
+  pass        String
+  fromName    String   @default("LMS")
+  fromEmail   String
+  updatedAt   DateTime @updatedAt
+
+  company Organization @relation("CompanySmtpConfig", fields: [companyId], references: [id])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+}

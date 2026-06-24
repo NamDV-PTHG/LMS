@@ -1,0 +1,314 @@
+import { z } from 'zod';
+import { prisma } from '@/lib/prisma';
+import { cacheAside, invalidateCourseCache, TTL, CACHE_KEYS } from '@/lib/cache';
+import { NotFoundError, ForbiddenError, ConflictError, ValidationError } from '@/lib/errors';
+import { RoleType } from '@/types';
+
+// ── Schemas ───────────────────────────────────────────────────
+
+export const createCourseSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().optional(),
+  thumbnailUrl: z.string().url().optional(),
+  estimatedHours: z.number().positive().optional(),
+  completionMode: z.enum(['ALL_LESSONS', 'REQUIRED_ONLY', 'QUIZ_PASS']).default('ALL_LESSONS'),
+  minimumPassingScore: z.number().int().min(0).max(100).optional(),
+});
+
+export const updateCourseSchema = createCourseSchema.partial();
+
+export const createSectionSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().optional(),
+  displayOrder: z.number().int().min(1).optional(), // auto-calculated if omitted
+  estimatedMinutes: z.number().int().positive().optional(),
+  deadlineOffsetDays: z.number().int().positive().optional(),
+  isRequired: z.boolean().default(true),
+});
+
+export const createLessonSchema = z.object({
+  title: z.string().min(1).max(200),
+  displayOrder: z.number().int().min(1).optional(), // auto-calculated if omitted
+  contentType: z.enum(['video', 'document', 'quiz', 'text', 'presentation', 'audio']),
+  estimatedMinutes: z.number().int().positive().optional(),
+  requiredMinutes: z.number().int().positive().optional(),
+  deadlineOffsetDays: z.number().int().positive().optional(),
+  availableAfterDays: z.number().int().positive().optional(),
+  isRequired: z.boolean().default(true),
+  prerequisiteLessonId: z.string().uuid().optional(),
+});
+
+export const publishCourseSchema = z.object({
+  targetCompanyIds: z.array(z.string().uuid()).optional(),  // group_admin publish to companies
+  isMandatory: z.boolean().default(false),
+  deadline: z.string().datetime().optional(),
+});
+
+export type CreateCourseInput = z.infer<typeof createCourseSchema>;
+export type UpdateCourseInput = z.infer<typeof updateCourseSchema>;
+export type CreateSectionInput = z.infer<typeof createSectionSchema>;
+export type CreateLessonInput = z.infer<typeof createLessonSchema>;
+export type PublishCourseInput = z.infer<typeof publishCourseSchema>;
+
+// ── Helpers ───────────────────────────────────────────────────
+
+async function assertCourseAccess(
+  courseId: string,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+  requireEdit = false,
+) {
+  const course = await prisma.course.findUnique({ where: { id: courseId } });
+  if (!course || !course.isActive) throw new NotFoundError('Khóa học');
+
+  const isGroupAdmin = roles.includes('group_admin');
+  if (isGroupAdmin) return course;
+
+  if (course.ownerCompanyId !== companyId) {
+    throw new ForbiddenError('Không có quyền truy cập khóa học này');
+  }
+
+  if (requireEdit) {
+    const canEdit = roles.some((r) => ['company_admin', 'instructor'].includes(r));
+    if (!canEdit && course.createdById !== userId) {
+      throw new ForbiddenError('Không có quyền chỉnh sửa khóa học này');
+    }
+  }
+
+  return course;
+}
+
+// ── Service functions ─────────────────────────────────────────
+
+export async function getCourses(
+  companyId: string,
+  isGroupAdmin: boolean,
+  filters: { page: number; limit: number; published?: boolean },
+) {
+  const { page, limit, published } = filters;
+  const where: Record<string, unknown> = {
+    isActive: true,
+    ...(isGroupAdmin ? {} : { ownerCompanyId: companyId }),
+    ...(published !== undefined ? { isPublished: published } : {}),
+  };
+
+  const [items, total] = await Promise.all([
+    prisma.course.findMany({
+      where,
+      select: {
+        id: true, title: true, description: true, thumbnailUrl: true,
+        estimatedHours: true, completionMode: true, isPublished: true,
+        createdAt: true, updatedAt: true,
+        ownerCompany: { select: { id: true, name: true } },
+        _count: { select: { sections: true, enrollments: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.course.count({ where }),
+  ]);
+
+  return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
+}
+
+export async function getCourse(courseId: string, companyId: string, userId: string, roles: RoleType[]) {
+  const course = await assertCourseAccess(courseId, companyId, userId, roles);
+
+  return prisma.course.findUnique({
+    where: { id: courseId },
+    include: {
+      ownerCompany: { select: { id: true, name: true } },
+      sections: {
+        orderBy: { displayOrder: 'asc' },
+        include: {
+          lessons: { orderBy: { displayOrder: 'asc' } },
+        },
+      },
+      _count: { select: { enrollments: true } },
+    },
+  });
+}
+
+export async function createCourse(input: CreateCourseInput, companyId: string, userId: string) {
+  const course = await prisma.course.create({
+    data: {
+      ...input,
+      ownerCompanyId: companyId,
+      createdById: userId,
+    },
+  });
+  return course;
+}
+
+export async function updateCourse(
+  courseId: string,
+  input: UpdateCourseInput,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  await assertCourseAccess(courseId, companyId, userId, roles, true);
+  const updated = await prisma.course.update({ where: { id: courseId }, data: input });
+  await invalidateCourseCache(courseId);
+  return updated;
+}
+
+export async function deleteCourse(
+  courseId: string,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  const course = await assertCourseAccess(courseId, companyId, userId, roles, true);
+
+  const enrollCount = await prisma.enrollment.count({ where: { courseId } });
+  if (enrollCount > 0) throw new ConflictError('Không thể xóa khóa học đã có học viên');
+
+  await prisma.course.update({ where: { id: courseId }, data: { isActive: false } });
+  await invalidateCourseCache(courseId);
+}
+
+export async function publishCourse(
+  courseId: string,
+  input: PublishCourseInput,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  const course = await assertCourseAccess(courseId, companyId, userId, roles, true);
+  const isGroupAdmin = roles.includes('group_admin');
+
+  // Publish internally (company_admin/instructor marks as published)
+  await prisma.course.update({ where: { id: courseId }, data: { isPublished: true } });
+
+  // group_admin can additionally publish to other companies
+  if (isGroupAdmin && input.targetCompanyIds?.length) {
+    await prisma.coursePublication.createMany({
+      data: input.targetCompanyIds.map((targetCompanyId) => ({
+        courseId,
+        targetCompanyId,
+        publishedById: userId,
+        isMandatory: input.isMandatory,
+        deadline: input.deadline ? new Date(input.deadline) : null,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  await invalidateCourseCache(courseId);
+  return prisma.course.findUnique({ where: { id: courseId } });
+}
+
+// ── Sections ──────────────────────────────────────────────────
+
+export async function createSection(
+  courseId: string,
+  input: CreateSectionInput,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  await assertCourseAccess(courseId, companyId, userId, roles, true);
+
+  // Auto-calculate displayOrder if not provided
+  const displayOrder = input.displayOrder ?? (
+    await prisma.courseSection.count({ where: { courseId } }) + 1
+  );
+
+  return prisma.courseSection.create({ data: { ...input, displayOrder, courseId } });
+}
+
+export async function updateSection(
+  courseId: string,
+  sectionId: string,
+  input: { title?: string; description?: string },
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  await assertCourseAccess(courseId, companyId, userId, roles, true);
+  const section = await prisma.courseSection.findUnique({ where: { id: sectionId } });
+  if (!section || section.courseId !== courseId) throw new NotFoundError('Section');
+  return prisma.courseSection.update({ where: { id: sectionId }, data: input });
+}
+
+// ── Lessons ───────────────────────────────────────────────────
+
+export async function createLesson(
+  courseId: string,
+  sectionId: string,
+  input: CreateLessonInput,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  await assertCourseAccess(courseId, companyId, userId, roles, true);
+
+  const section = await prisma.courseSection.findUnique({ where: { id: sectionId } });
+  if (!section || section.courseId !== courseId) throw new NotFoundError('Section');
+
+  if (input.prerequisiteLessonId) {
+    const prereq = await prisma.lesson.findUnique({ where: { id: input.prerequisiteLessonId } });
+    if (!prereq || prereq.sectionId !== sectionId) {
+      throw new ValidationError('prerequisiteLessonId không hợp lệ');
+    }
+  }
+
+  // Auto-calculate displayOrder if not provided
+  const displayOrder = input.displayOrder ?? (
+    await prisma.lesson.count({ where: { sectionId } }) + 1
+  );
+
+  return prisma.lesson.create({ data: { ...input, displayOrder, sectionId } });
+}
+
+export async function updateLesson(
+  courseId: string,
+  sectionId: string,
+  lessonId: string,
+  input: { title?: string; estimatedMinutes?: number },
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  await assertCourseAccess(courseId, companyId, userId, roles, true);
+  const lesson = await prisma.lesson.findUnique({ where: { id: lessonId } });
+  if (!lesson || lesson.sectionId !== sectionId) throw new NotFoundError('Lesson');
+  return prisma.lesson.update({ where: { id: lessonId }, data: input });
+}
+
+// ── Course assignment (Cơ chế ③) ─────────────────────────────
+
+export const assignCourseSchema = z.object({
+  courseId: z.string().uuid(),
+  targetUserId: z.string().uuid().optional(),
+  targetDeptId: z.string().uuid().optional(),
+  targetCompanyId: z.string().uuid().optional(),
+  deadline: z.string().datetime().optional(),
+  isMandatory: z.boolean().default(false),
+});
+
+export type AssignCourseInput = z.infer<typeof assignCourseSchema>;
+
+export async function assignCourse(
+  input: AssignCourseInput,
+  companyId: string,
+  userId: string,
+) {
+  const course = await prisma.course.findUnique({ where: { id: input.courseId } });
+  if (!course || !course.isActive || !course.isPublished) throw new NotFoundError('Khóa học');
+
+  return prisma.courseAssignment.create({
+    data: {
+      courseId: input.courseId,
+      targetUserId: input.targetUserId,
+      targetDeptId: input.targetDeptId,
+      targetCompanyId: input.targetCompanyId ?? companyId,
+      assignedById: userId,
+      deadline: input.deadline ? new Date(input.deadline) : null,
+      isMandatory: input.isMandatory,
+    },
+  });
+}
