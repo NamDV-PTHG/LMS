@@ -80,15 +80,9 @@ export function VideoPlayer({
   const sessionId = useRef<string>(crypto.randomUUID());
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Anti-fraud refs ───────────────────────────────────────────
-  // Vị trí xa nhất đã xem thực sự (chỉ cập nhật khi KHÔNG đang seek)
-  const maxWatchedSec = useRef<number>(0);
-  // Snapshot maxWatchedSec tại thời điểm BẮT ĐẦU seek (chỉ lấy 1 lần / lần seek)
-  const seekStartWatched = useRef<number>(0);
-  // Đang trong quá trình seek do người dùng (giữa seeking và seeked)
-  const isUserSeeking = useRef<boolean>(false);
-  // Seek này do hệ thống cưỡng chế (không phải user)
-  const isForcedSeek = useRef<boolean>(false);
+  // Ref để passed các giá trị anti-fraud vào closure của player.ended
+  // (vì maxWatched là let variable trong effect, cần một bridge để ended đọc được)
+  const maxWatchedRef = useRef<number>(0);
 
   const [streamData, setStreamData] = useState<StreamData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -142,10 +136,66 @@ export function VideoPlayer({
     playerRef.current = player;
     const sid = sessionId.current;
 
-    // ── Vô hiệu hóa thanh progress khi chống gian lận ─────────
-    if (!allowFreeSeeking) {
-      player.ready(() => {
-        // 1. Disable progress control trong video.js
+    // ── Khởi tạo anti-fraud state (local variables trong closure) ──
+    // Dùng let thay vì ref vì không cần trigger React re-render,
+    // chỉ cần persist trong vòng đời effect này.
+    let maxWatched = 0;   // giây xa nhất đã xem thực sự
+    let forcedSeek = false; // true khi HỆ THỐNG đang seek về — để phân biệt với user seek
+
+    // Sync maxWatched vào ref để player.ended có thể đọc
+    const syncRef = () => { maxWatchedRef.current = maxWatched; };
+
+    player.ready(() => {
+      const nativeVideo = player.el()?.querySelector('video') as HTMLVideoElement | null;
+      if (!nativeVideo) return;
+
+      // ══════════════════════════════════════════════════════
+      // CORE: Theo dõi vị trí đã xem thực sự
+      // Dùng native timeupdate + native .seeking (đáng tin hơn player.seeking())
+      // ══════════════════════════════════════════════════════
+      nativeVideo.addEventListener('timeupdate', () => {
+        // Chỉ cập nhật khi KHÔNG đang seek (kể cả forced seek)
+        if (!nativeVideo.seeking && !forcedSeek) {
+          const current = Math.floor(nativeVideo.currentTime);
+          if (current > maxWatched) {
+            maxWatched = current;
+            syncRef();
+          }
+        }
+      });
+
+      if (!allowFreeSeeking) {
+        // ══════════════════════════════════════════════════════
+        // BLOCK 1: Chặn seeking NGAY LẬP TỨC trên native video element
+        // Đây là cách đáng tin nhất — không cần chờ seeked event
+        // ══════════════════════════════════════════════════════
+        nativeVideo.addEventListener('seeking', () => {
+          if (forcedSeek) {
+            // Đây là seek do hệ thống tạo ra (forced back) — cho phép
+            forcedSeek = false;
+            return;
+          }
+
+          const target = nativeVideo.currentTime;
+
+          // Buffer 2 giây để tránh false-positive với buffering/auto-resume
+          if (target > maxWatched + 2) {
+            // Từ chối seek: đặt lại ngay về vị trí đã xem
+            forcedSeek = true;
+            nativeVideo.currentTime = maxWatched;
+
+            showFraudWarning('Không thể tua đến phần chưa xem. Hãy xem theo thứ tự.');
+            trackFraud(assetId, enrollmentId, accessToken, 'forward_seek', {
+              attemptedSec: Math.round(target),
+              allowedSec: maxWatched,
+            });
+          }
+          // Seek lùi hoặc trong vùng đã xem → cho phép (không làm gì)
+        });
+
+        // ══════════════════════════════════════════════════════
+        // BLOCK 2: Vô hiệu hóa thanh progress bar UI
+        // ══════════════════════════════════════════════════════
         const progressControl = (player.controlBar as any)?.progressControl;
         if (progressControl) {
           progressControl.disable();
@@ -158,9 +208,28 @@ export function VideoPlayer({
           }
         }
 
-        // 2. Chặn phím tắt tua (← →) và skip (+10s/-10s)
+        // Thêm CSS override để chắc chắn không có element con nào clickable
+        const styleTag = document.createElement('style');
+        styleTag.textContent = `
+          .vjs-progress-control,
+          .vjs-seek-bar,
+          .vjs-play-progress,
+          .vjs-load-progress,
+          .vjs-mouse-display {
+            pointer-events: none !important;
+            cursor: not-allowed !important;
+          }
+        `;
+        document.head.appendChild(styleTag);
+
+        // Cleanup style tag khi player bị destroy
+        player.on('dispose', () => styleTag.remove());
+
+        // ══════════════════════════════════════════════════════
+        // BLOCK 3: Chặn phím tắt tua (← → và J/L trong một số cấu hình)
+        // ══════════════════════════════════════════════════════
         player.on('keydown', (e: KeyboardEvent) => {
-          const blocked = ['ArrowLeft', 'ArrowRight'];
+          const blocked = ['ArrowLeft', 'ArrowRight', 'j', 'J', 'l', 'L'];
           if (blocked.includes(e.key)) {
             e.stopImmediatePropagation();
             e.preventDefault();
@@ -168,32 +237,18 @@ export function VideoPlayer({
           }
         });
 
-        // 3. Block seeking qua native video element (backup cho HLS/VHS)
-        const nativeVideo = player.el()?.querySelector('video') as HTMLVideoElement | null;
-        if (nativeVideo) {
-          nativeVideo.addEventListener('seeking', () => {
-            // Chỉ block khi đây là seek do user (không phải forced)
-            if (!isForcedSeek.current && !isUserSeeking.current) {
-              seekStartWatched.current = maxWatchedSec.current;
-              isUserSeeking.current = true;
-            }
-          });
-        }
-      });
-    }
-
-    // ── Cập nhật maxWatchedSec — CHỈ khi không đang seek ─────
-    // Fix quan trọng: dùng player.seeking() để tránh timeupdate pollute maxWatchedSec
-    player.on('timeupdate', () => {
-      if (!player.seeking() && !isForcedSeek.current) {
-        const current = Math.floor(player.currentTime() ?? 0);
-        if (current > maxWatchedSec.current) {
-          maxWatchedSec.current = current;
-        }
+        // Backup: chặn keydown trên native video element
+        nativeVideo.addEventListener('keydown', (e: KeyboardEvent) => {
+          const blocked = ['ArrowLeft', 'ArrowRight'];
+          if (blocked.includes(e.key)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+          }
+        });
       }
     });
 
-    // ── Tracking: play / heartbeat / pause ────────────────────
+    // ── Tracking: play / heartbeat ────────────────────────────
     player.on('play', () => {
       track(assetId, enrollmentId, sid, accessToken, 'watch_start', {
         watchPositionSec: Math.floor(player.currentTime() ?? 0),
@@ -232,50 +287,6 @@ export function VideoPlayer({
       });
     });
 
-    // ── Bắt đầu seek: snapshot vị trí đã xem xa nhất ─────────
-    // Chỉ ghi nhận LẦN ĐẦU của mỗi lượt seek (seeking có thể fire nhiều lần khi kéo)
-    player.on('seeking', () => {
-      if (!isForcedSeek.current && !isUserSeeking.current) {
-        seekStartWatched.current = maxWatchedSec.current;
-        isUserSeeking.current = true;
-      }
-    });
-
-    // ── Kết thúc seek: kiểm tra và cưỡng chế nếu gian lận ────
-    player.on('seeked', () => {
-      // Nếu đây là forced seek do hệ thống → bỏ qua, chỉ reset flag
-      if (isForcedSeek.current) {
-        isForcedSeek.current = false;
-        isUserSeeking.current = false;
-        return;
-      }
-
-      isUserSeeking.current = false;
-      const seekedTo = Math.floor(player.currentTime() ?? 0);
-
-      if (!allowFreeSeeking) {
-        // Buffer 2 giây để tránh false-positive với video buffer/auto-resume
-        const allowedMax = seekStartWatched.current + 2;
-        if (seekedTo > allowedMax) {
-          // Cưỡng chế quay về vị trí đã xem
-          isForcedSeek.current = true;
-          player.currentTime(seekStartWatched.current);
-          showFraudWarning('Không thể tua đến phần chưa xem. Hãy xem theo thứ tự.');
-          trackFraud(assetId, enrollmentId, accessToken, 'forward_seek', {
-            attemptedSec: seekedTo,
-            allowedSec: seekStartWatched.current,
-            maxWatchedSec: maxWatchedSec.current,
-          });
-          return;
-        }
-      }
-
-      // Seek hợp lệ (backward hoặc trong phạm vi đã xem)
-      track(assetId, enrollmentId, sid, accessToken, 'seek', {
-        watchPositionSec: seekedTo,
-      });
-    });
-
     // ── Hoàn thành video ──────────────────────────────────────
     player.on('ended', () => {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
@@ -286,7 +297,8 @@ export function VideoPlayer({
 
       const duration = player.duration() ?? 0;
       if (duration > 0) {
-        const watchedPct = (maxWatchedSec.current / duration) * 100;
+        // Đọc từ ref vì maxWatched là local variable trong ready() closure
+        const watchedPct = (maxWatchedRef.current / duration) * 100;
         if (watchedPct >= requiredWatchPct) {
           onComplete?.();
         } else {

@@ -3,6 +3,26 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-06-29 18:00] Fix chống gian lận video lần 2 — redesign hoàn toàn
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/components/lesson/VideoPlayer.tsx` — viết lại lần 3 với cách tiếp cận hoàn toàn khác:
+  - **Vấn đề cốt lõi:** cách trước block trong `seeked` event → quá muộn; VHS (HLS plugin) có thể làm `player.seeking()` trả false trước khi `seeked` fire → `maxWatchedSec` bị cập nhật lên vị trí seek đích
+  - **Giải pháp mới:** Block trực tiếp trong native `<video>.addEventListener('seeking', ...)` → đặt `video.currentTime = maxWatched` NGAY LẬP TỨC trước khi browser load segment mới
+  - Dùng `let maxWatched` + `let forcedSeek` là local variables trong closure (không phải React ref) để tránh race condition
+  - Dùng `nativeVideo.seeking` thay vì `player.seeking()` — đáng tin hơn với VHS
+  - Thêm `<style>` tag inject CSS `pointer-events: none` cho toàn bộ vjs-progress-control (kể cả child elements) — cleanup khi dispose
+  - Chặn thêm phím J/L (video.js skip shortcuts)
+
+**Kết quả:**
+- Build OK, `pm2 restart lms-web` — status online
+
+**Lưu ý / Rủi ro:**
+- `maxWatchedRef` là bridge giữa `let maxWatched` (trong ready closure) và `player.on('ended')` handler
+- `forcedSeek = false` được reset trong `seeking` handler khi hệ thống seek → tránh vòng lặp vô hạn
+
 ## [2026-06-29 17:30] Fix chống gian lận video — seek vẫn hoạt động bình thường
 
 **Loại:** fix
