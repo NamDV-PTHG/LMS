@@ -4,6 +4,7 @@ import { getAuthUser } from './auth.middleware';
 import { resolveTenantId, hasRole } from './tenant-guard';
 import { ForbiddenError } from '@/lib/errors';
 import { handleApiError } from '@/app/api/error-handler';
+import { redis } from '@/lib/redis';
 
 type RouteHandler = (
   req: NextRequest,
@@ -38,6 +39,9 @@ export function withRole(
       }
 
       const companyId = resolveTenantId(req, user);
+
+      // Track user as online — fire-and-forget, never blocks the request
+      redis.setex(`online:${user.id}`, 15 * 60, companyId).catch(() => {});
 
       return await handler(req, {
         params: ctx?.params,

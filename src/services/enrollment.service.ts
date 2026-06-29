@@ -126,7 +126,7 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
         SELECT CASE WHEN COUNT(l.id) = 0 THEN 0
                ELSE COALESCE(SUM(lp2."progressPct"), 0)::float / COUNT(l.id)
                END
-        FROM "Section" s
+        FROM "CourseSection" s
         JOIN "Lesson" l ON l."sectionId" = s.id
         LEFT JOIN "LessonProgress" lp2
           ON lp2."lessonId" = l.id AND lp2."enrollmentId" = e.id

@@ -117,33 +117,47 @@ export async function getOrganization(id: string, companyId: string, isGroupAdmi
 }
 
 export async function createOrganization(input: CreateOrgInput, companyId: string, isGroupAdmin: boolean) {
-  // Resolve companyId for the new org
-  let orgCompanyId: string;
   if (input.type === 'group') {
     if (!isGroupAdmin) throw new ForbiddenError('Chỉ group_admin mới được tạo tổ chức cấp group');
-    orgCompanyId = '';
   } else if (input.type === 'company') {
     if (!isGroupAdmin) throw new ForbiddenError('Chỉ group_admin mới được tạo công ty con');
-    orgCompanyId = input.parentId ?? '';
-  } else {
-    // dept / team: inherit companyId from parent or current user
-    orgCompanyId = companyId;
   }
 
-  // Check unique code within company
-  const existing = await prisma.organization.findFirst({
-    where: { code: input.code, companyId: orgCompanyId },
-  });
+  // For group/company orgs companyId is self-referential (set after creation).
+  // For dept/team, inherit the caller's companyId.
+  const isDeptOrTeam = input.type !== 'group' && input.type !== 'company';
+  const orgCompanyId = isDeptOrTeam ? companyId : null;
+
+  // Check unique code (for dept/team within company; for company/group globally)
+  const existing = isDeptOrTeam
+    ? await prisma.organization.findFirst({ where: { code: input.code, companyId: orgCompanyId } })
+    : await prisma.organization.findFirst({ where: { code: input.code, type: input.type } });
   if (existing) throw new ConflictError(`Mã tổ chức "${input.code}" đã tồn tại`);
 
-  const org = await prisma.organization.create({
-    data: {
-      ...input,
-      companyId: orgCompanyId,
-    },
+  if (isDeptOrTeam) {
+    const org = await prisma.organization.create({
+      data: { ...input, companyId: orgCompanyId },
+    });
+    await invalidateOrgCache(companyId);
+    return org;
+  }
+
+  // For group / company: create first, then set companyId = own id
+  const org = await prisma.$transaction(async (tx) => {
+    const created = await tx.organization.create({
+      data: { ...input, companyId: null },
+    });
+    // company org's companyId = its own id (enables standard tenant queries)
+    if (created.type === 'company') {
+      return tx.organization.update({
+        where: { id: created.id },
+        data: { companyId: created.id },
+      });
+    }
+    return created;
   });
 
-  await invalidateOrgCache(orgCompanyId);
+  await invalidateOrgCache(org.companyId ?? org.id);
   return org;
 }
 

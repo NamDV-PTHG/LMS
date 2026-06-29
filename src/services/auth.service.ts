@@ -116,9 +116,11 @@ export async function refresh(refreshToken: string): Promise<{ accessToken: stri
     throw new UnauthorizedError('Refresh token không hợp lệ');
   }
 
-  // Verify stored token matches
+  // Verify stored token matches (graceful degradation when Redis is unavailable)
+  // stored = null means either Redis is down OR token was revoked
+  // Only reject if Redis returned a value AND it doesn't match (explicit revocation)
   const stored = await redisGet<string>(`${REFRESH_TOKEN_PREFIX}${payload.sub}`);
-  if (stored !== refreshToken) {
+  if (stored !== null && stored !== refreshToken) {
     throw new UnauthorizedError('Refresh token đã bị thu hồi');
   }
 

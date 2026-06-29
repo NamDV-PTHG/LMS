@@ -74,24 +74,36 @@ export async function checkEmailDomain(email: string): Promise<{ valid: boolean;
 export async function getUsers(
   companyId: string,
   isGroupAdmin: boolean,
-  filters: { deptId?: string; role?: string; page: number; limit: number },
+  filters: { deptId?: string; role?: string; page: number; limit: number; filterCompanyId?: string | null },
 ) {
-  const { deptId, role, page, limit } = filters;
+  const { deptId, role, page, limit, filterCompanyId } = filters;
+
+  // Safety guard: non-admin calls MUST have a valid companyId
+  if (!isGroupAdmin && !companyId) {
+    return { items: [], total: 0, page, limit, totalPages: 0 };
+  }
+
+  // Effective company filter:
+  // - group_admin with no filterCompanyId → no org filter (see all)
+  // - group_admin with filterCompanyId → filter by that company
+  // - others → filter by their companyId
+  const effectiveCompanyId = isGroupAdmin ? (filterCompanyId ?? null) : companyId;
+  const applyOrgFilter = !isGroupAdmin || !!filterCompanyId;
 
   const where: Record<string, unknown> = {
     isActive: true,
     roles: {
       some: {
-        ...(isGroupAdmin
-          ? {}
-          : {
+        ...(applyOrgFilter && effectiveCompanyId
+          ? {
               organization: {
                 OR: [
-                  { companyId },       // departments/teams under the company
-                  { id: companyId },   // the company org itself
+                  { companyId: effectiveCompanyId },  // departments/teams under the company
+                  { id: effectiveCompanyId },          // the company org itself
                 ],
               },
-            }),
+            }
+          : {}),
         ...(role ? { role: role as RoleType } : {}),
         ...(deptId ? { organizationId: deptId } : {}),
       },
@@ -115,7 +127,7 @@ export async function getUsers(
           select: {
             role: true,
             organizationId: true,
-            organization: { select: { name: true, type: true } },
+            organization: { select: { name: true, type: true, companyId: true } },
           },
         },
       },

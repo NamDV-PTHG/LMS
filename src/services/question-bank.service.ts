@@ -234,6 +234,13 @@ export async function getImportJob(jobId: string, companyId: string) {
   return doc;
 }
 
+export async function markImportJobFailed(jobId: string, errorMessage: string): Promise<void> {
+  await prisma.sourceDocument.update({
+    where: { id: jobId },
+    data: { status: 'failed', errorMessage, processedAt: new Date() },
+  }).catch(() => {}); // Best-effort — don't throw if job was already cleaned up
+}
+
 /**
  * Called by FastAPI webhook to save generated questions and update job status.
  */
