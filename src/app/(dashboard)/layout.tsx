@@ -3,6 +3,7 @@
 import { AuthProvider, useAuth } from '@/components/providers/auth-provider';
 import { ToastProvider } from '@/components/ui/toast';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -20,6 +21,7 @@ const NAV_LINKS = [
   { href: '/positions',             label: 'Vị trí',              roles: ['group_admin','group_hrm','company_admin'] },
   { href: '/position-changes',      label: 'Thay đổi vị trí',    roles: ['group_admin','group_hrm'] },
   { href: '/ai-config',             label: 'Cấu hình AI',         roles: ['group_admin'] },
+  { href: '/operations',            label: 'Vận hành hệ thống',   roles: ['group_admin'] },
   { href: '/courses',               label: 'Khóa học',            roles: ['group_admin','group_hrm','company_admin','hr_manager','instructor'] },
   { href: '/users',                 label: 'Người dùng',          roles: ['company_admin','hr_manager'] },
   { href: '/import',                label: 'Nhập liệu',           roles: ['company_admin','hr_manager'] },
@@ -31,18 +33,44 @@ const NAV_LINKS = [
   { href: '/settings',               label: 'Cài đặt',             roles: ['group_admin', 'company_admin'] },
 ];
 
+// ── Company branding ───────────────────────────────────────────
+interface CompanyInfo {
+  name: string;
+  logoUrl: string | null;
+  primaryColor: string | null;
+}
+
 // ── Inner shell (uses useAuth inside AuthProvider) ─────────────
 function DashboardShell({ children }: { children: React.ReactNode }) {
-  const { user, isLoading, logout } = useAuth();
+  const { user, accessToken, isLoading, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [company, setCompany] = useState<CompanyInfo | null>(null);
 
   useEffect(() => {
     if (!isLoading && !user) {
       router.replace('/login');
     }
   }, [isLoading, user, router]);
+
+  // Fetch company branding once we have a token
+  useEffect(() => {
+    if (!accessToken) return;
+    fetch('/api/me/company', { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setCompany(res.data as CompanyInfo);
+      })
+      .catch(() => {/* silent */});
+  }, [accessToken]);
+
+  // Apply company primary color as CSS variable
+  useEffect(() => {
+    if (company?.primaryColor) {
+      document.documentElement.style.setProperty('--color-primary', company.primaryColor);
+    }
+  }, [company?.primaryColor]);
 
   if (isLoading) {
     return (
@@ -81,10 +109,24 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         className={`fixed lg:static inset-y-0 left-0 z-30 w-60 bg-white border-r flex flex-col transition-transform duration-200
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
-        {/* Logo */}
-        <div className="h-14 flex items-center px-5 border-b shrink-0">
-          <span className="font-bold text-blue-600 text-lg tracking-tight">LMS</span>
-          <span className="ml-1 text-gray-500 text-sm font-medium">Tập đoàn</span>
+        {/* Logo / Company branding */}
+        <div className="h-14 flex items-center px-4 border-b shrink-0 gap-2">
+          <span className="font-bold text-blue-600 text-lg tracking-tight shrink-0">LMS</span>
+          {company?.logoUrl ? (
+            <div className="relative h-7 flex-1 min-w-0">
+              <Image
+                src={company.logoUrl}
+                alt={company.name}
+                fill
+                className="object-contain object-left"
+                unoptimized
+              />
+            </div>
+          ) : (
+            <span className="ml-0.5 text-gray-500 text-sm font-medium truncate">
+              {company?.name || 'Tập đoàn'}
+            </span>
+          )}
         </div>
 
         {/* Nav */}
@@ -143,7 +185,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <span className="font-semibold text-gray-800 text-sm">LMS Tập đoàn</span>
+          <span className="font-semibold text-gray-800 text-sm">
+            LMS {company?.name || 'Tập đoàn'}
+          </span>
         </header>
 
         <main className="flex-1 overflow-y-auto">

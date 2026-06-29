@@ -15,7 +15,9 @@ export const GET = withRole(
     const role = sp.get('role') ?? undefined;
 
     const isGroupAdmin = user.roles.includes('group_admin');
-    const result = await getUsers(companyId, isGroupAdmin, { deptId, role, page, limit });
+    // group_admin can filter by specific company via ?filterCompanyId=<uuid>
+    const filterCompanyId = isGroupAdmin ? (sp.get('filterCompanyId') ?? null) : null;
+    const result = await getUsers(companyId, isGroupAdmin, { deptId, role, page, limit, filterCompanyId });
 
     return NextResponse.json({ success: true, data: result.items, meta: result });
   },

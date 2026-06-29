@@ -60,6 +60,12 @@ export default function OrgDetailPage() {
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
 
+  // Create admin (quick-create company_admin for this org)
+  const [showCreateAdmin, setShowCreateAdmin] = useState(false);
+  const [adminForm, setAdminForm] = useState({ email: '', fullName: '', password: '' });
+  const [creatingAdmin, setCreatingAdmin] = useState(false);
+  const [adminMsg, setAdminMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
   const { toast } = useToast();
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -96,7 +102,12 @@ export default function OrgDetailPage() {
 
   const loadUsers = () => {
     if (!accessToken) return;
-    fetch(`/api/users?organizationId=${id}&limit=200`, { headers: { Authorization: `Bearer ${accessToken}` } })
+    // Use filterCompanyId for company-type orgs to get all users in that company
+    // Use deptId for dept/team orgs to get users directly in that org
+    const param = org?.type === 'company'
+      ? `filterCompanyId=${id}`
+      : `deptId=${id}`;
+    fetch(`/api/users?${param}&limit=200`, { headers: { Authorization: `Bearer ${accessToken}` } })
       .then((r) => r.json())
       .then((res) => {
         if (res.success) setUsers(res.data ?? []);
@@ -204,6 +215,37 @@ export default function OrgDetailPage() {
       toast('error', 'Lỗi kết nối');
     } finally {
       setRemovingRoleId(null);
+    }
+  };
+
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingAdmin(true);
+    setAdminMsg(null);
+    try {
+      const res = await fetch(`/api/organizations/${id}/admin`, {
+        method: 'POST',
+        headers: authHeader,
+        body: JSON.stringify({
+          email: adminForm.email.trim(),
+          fullName: adminForm.fullName.trim(),
+          password: adminForm.password || undefined,
+        }),
+      }).then((r) => r.json());
+      if (res.success) {
+        const emailNote = res.data?.emailSent
+          ? 'Thông tin đăng nhập đã gửi qua email.'
+          : `⚠ Tài khoản đã tạo nhưng email chưa gửi được (${res.data?.emailError ?? 'SMTP chưa cấu hình'}). Hãy cung cấp mật khẩu cho người dùng thủ công.`;
+        setAdminMsg({ type: res.data?.emailSent ? 'ok' : 'err', text: `Đã tạo tài khoản cho ${adminForm.email}. ${emailNote}` });
+        setAdminForm({ email: '', fullName: '', password: '' });
+        loadUsers();
+      } else {
+        setAdminMsg({ type: 'err', text: res.error ?? 'Tạo thất bại' });
+      }
+    } catch {
+      setAdminMsg({ type: 'err', text: 'Lỗi kết nối server' });
+    } finally {
+      setCreatingAdmin(false);
     }
   };
 
@@ -385,8 +427,82 @@ export default function OrgDetailPage() {
       {/* Tab: Users */}
       {activeTab === 'users' && (
         <div className="space-y-4">
+          {/* Create Admin section — for group_admin on company-type orgs */}
+          {isGroupAdmin && org.type === 'company' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-amber-800">Quản trị viên công ty</p>
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    Tạo nhanh tài khoản company_admin cho công ty <strong>{org.name}</strong>.
+                    Thông tin đăng nhập sẽ gửi qua email.
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setShowCreateAdmin((v) => !v); setAdminMsg(null); }}
+                  className="px-3 py-1.5 text-xs bg-amber-500 text-white rounded-lg hover:bg-amber-600 whitespace-nowrap"
+                >
+                  {showCreateAdmin ? 'Đóng' : '+ Tạo quản trị viên'}
+                </button>
+              </div>
+
+              {showCreateAdmin && (
+                <form onSubmit={handleCreateAdmin} className="space-y-3 pt-1">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Email <span className="text-red-500">*</span></label>
+                      <input
+                        type="email"
+                        value={adminForm.email}
+                        onChange={(e) => setAdminForm((f) => ({ ...f, email: e.target.value }))}
+                        placeholder="admin@company.com"
+                        required
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Họ tên <span className="text-red-500">*</span></label>
+                      <input
+                        type="text"
+                        value={adminForm.fullName}
+                        onChange={(e) => setAdminForm((f) => ({ ...f, fullName: e.target.value }))}
+                        placeholder="Nguyễn Văn A"
+                        required
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Mật khẩu (để trống = tự tạo ngẫu nhiên)</label>
+                    <input
+                      type="text"
+                      value={adminForm.password}
+                      onChange={(e) => setAdminForm((f) => ({ ...f, password: e.target.value }))}
+                      placeholder="Để trống để tạo ngẫu nhiên"
+                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white font-mono"
+                    />
+                  </div>
+                  {adminMsg && (
+                    <p className={`text-xs px-3 py-2 rounded-lg ${adminMsg.type === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                      {adminMsg.text}
+                    </p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={creatingAdmin || !adminForm.email || !adminForm.fullName}
+                    className="px-4 py-2 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 font-medium"
+                  >
+                    {creatingAdmin ? 'Đang tạo...' : 'Tạo tài khoản quản trị viên'}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500">{users.length} người dùng trong tổ chức này</p>
+            <p className="text-sm text-gray-500">
+              {users.length} người dùng {org.type === 'company' ? 'thuộc công ty' : 'trong tổ chức'} này
+            </p>
             {canEdit && (
               <button
                 onClick={() => { setShowAssignRole(true); loadAllUsers(); }}

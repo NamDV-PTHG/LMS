@@ -8,6 +8,7 @@ interface UserRole {
   role: string;
   organizationId: string;
   organizationName: string;
+  organizationType?: string;
 }
 
 interface User {
@@ -43,6 +44,7 @@ export default function UsersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [filterCompanyId, setFilterCompanyId] = useState(''); // group_admin company filter
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({
@@ -78,7 +80,9 @@ export default function UsersPage() {
 
   const load = () => {
     setIsLoading(true);
-    fetch('/api/users?limit=200', { headers: { Authorization: `Bearer ${accessToken}` } })
+    const params = new URLSearchParams({ limit: '200' });
+    if (isGroupAdmin && filterCompanyId) params.set('filterCompanyId', filterCompanyId);
+    fetch(`/api/users?${params}`, { headers: { Authorization: `Bearer ${accessToken}` } })
       .then((r) => r.json())
       .then((res) => {
         if (res.success) setUsers(res.data ?? []);
@@ -106,6 +110,11 @@ export default function UsersPage() {
   useEffect(() => {
     if (accessToken) { load(); loadOrgs(); }
   }, [accessToken]); // eslint-disable-line
+
+  // Re-fetch when company filter changes
+  useEffect(() => {
+    if (accessToken) load();
+  }, [filterCompanyId]); // eslint-disable-line
 
   const openModal = () => {
     setCreateError(null);
@@ -166,7 +175,6 @@ export default function UsersPage() {
       return;
     }
     if (emailCheck === 'idle') {
-      // Chưa kiểm tra — chạy kiểm tra trước khi tạo
       await handleEmailBlur();
       return;
     }
@@ -212,6 +220,13 @@ export default function UsersPage() {
   const companies = orgs.filter((o) => o.type === 'company');
   const depts = orgs.filter((o) => o.type !== 'company');
 
+  // Get the company name for a user (first company-type role, or first role's org)
+  const getUserCompany = (u: User): string => {
+    const companyRole = u.roles.find((r) => r.organizationType === 'company');
+    if (companyRole) return companyRole.organizationName;
+    return u.roles[0]?.organizationName ?? '—';
+  };
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
@@ -227,30 +242,56 @@ export default function UsersPage() {
         </button>
       </div>
 
-      <input
-        type="text"
-        placeholder="Tìm theo tên, email, mã nhân viên..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="w-full max-w-sm border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
+      {/* Filters row */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <input
+          type="text"
+          placeholder="Tìm theo tên, email, mã nhân viên..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="flex-1 min-w-[200px] max-w-sm border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {/* Company filter — only for group_admin */}
+        {isGroupAdmin && companies.length > 0 && (
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-500 whitespace-nowrap">Lọc theo công ty:</label>
+            <select
+              value={filterCompanyId}
+              onChange={(e) => setFilterCompanyId(e.target.value)}
+              className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">— Tất cả công ty —</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
 
       {isLoading ? (
         <div className="text-center py-16 text-gray-400">Đang tải...</div>
       ) : error ? (
         <div className="text-center py-16 text-red-500">{error}</div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">Không có kết quả</div>
+        <div className="text-center py-16 text-gray-400">
+          {filterCompanyId ? 'Công ty này chưa có người dùng nào' : 'Không có kết quả'}
+        </div>
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-4 py-2 border-b bg-gray-50 text-xs text-gray-500">
+            {filtered.length} người dùng{filterCompanyId ? ` (đã lọc theo công ty)` : isGroupAdmin ? ' (tất cả công ty)' : ''}
+          </div>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-gray-50">
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Họ tên</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Email</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Mã NV</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Chức danh</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Vai trò / Công ty</th>
+                {isGroupAdmin && (
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Công ty</th>
+                )}
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Vai trò</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Trạng thái</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -258,22 +299,24 @@ export default function UsersPage() {
             <tbody className="divide-y">
               {filtered.map((u) => (
                 <tr key={u.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{u.fullName}</td>
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-gray-900">{u.fullName}</p>
+                    {u.jobTitle && <p className="text-xs text-gray-400">{u.jobTitle}</p>}
+                  </td>
                   <td className="px-4 py-3 text-gray-500 text-xs">{u.email}</td>
                   <td className="px-4 py-3 text-gray-400 text-xs">{u.employeeCode ?? '—'}</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">{u.jobTitle ?? '—'}</td>
+                  {isGroupAdmin && (
+                    <td className="px-4 py-3 text-xs text-gray-600">{getUserCompany(u)}</td>
+                  )}
                   <td className="px-4 py-3">
                     <div className="flex flex-col gap-1">
                       {(u.roles ?? []).slice(0, 2).map((r, i) => (
-                        <div key={i} className="flex items-center gap-1.5">
-                          <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-medium whitespace-nowrap">
-                            {ROLE_LABEL[r.role] ?? r.role}
-                          </span>
-                          <span className="text-xs text-gray-400 truncate max-w-[120px]">{r.organizationName}</span>
-                        </div>
+                        <span key={i} className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-medium whitespace-nowrap w-fit">
+                          {ROLE_LABEL[r.role] ?? r.role}
+                        </span>
                       ))}
                       {u.roles.length > 2 && (
-                        <span className="text-xs text-gray-400">+{u.roles.length - 2} vai trò khác</span>
+                        <span className="text-xs text-gray-400">+{u.roles.length - 2} khác</span>
                       )}
                     </div>
                   </td>
@@ -306,7 +349,7 @@ export default function UsersPage() {
             </div>
             <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
 
-              {/* Org + Role — quan trọng nhất đặt lên đầu */}
+              {/* Org + Role */}
               <div className="bg-blue-50 rounded-xl p-4 space-y-3 border border-blue-100">
                 <p className="text-sm font-semibold text-blue-800">Thuộc tổ chức & Vai trò</p>
                 <div>
@@ -380,7 +423,6 @@ export default function UsersPage() {
                           : ''
                       }`}
                     />
-                    {/* Status icon */}
                     {emailCheck === 'checking' && (
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs animate-pulse">⏳</span>
                     )}
@@ -419,8 +461,8 @@ export default function UsersPage() {
                       placeholder="Mật khẩu"
                       className="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
                     <button type="button" onClick={generatePassword}
-                      className="px-3 py-2 border text-xs rounded-lg hover:bg-gray-50 whitespace-nowrap text-gray-600" title="Tạo mật khẩu ngẫu nhiên">
-                      🔀 Tạo ngẫu nhiên
+                      className="px-3 py-2 border text-xs rounded-lg hover:bg-gray-50 whitespace-nowrap text-gray-600">
+                      Tạo ngẫu nhiên
                     </button>
                   </div>
                   <div className="flex items-center gap-2 mt-2">

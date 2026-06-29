@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { handleApiError } from '@/app/api/error-handler';
 import { NotFoundError, ValidationError, ConflictError } from '@/lib/errors';
 import { sendWelcomeEmail } from '@/services/email.service';
+import { checkEmailDomain } from '@/services/user.service';
 
 function generatePassword(): string {
   const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -51,6 +52,12 @@ export const POST = withRole(
         throw new ValidationError('Họ tên phải có ít nhất 2 ký tự');
       }
 
+      // Xác thực tên miền email có MX record không
+      const domainCheck = await checkEmailDomain(email);
+      if (!domainCheck.valid) {
+        throw new ValidationError(domainCheck.reason ?? 'Email không hợp lệ');
+      }
+
       const existing = await prisma.user.findUnique({ where: { email } });
       if (existing) throw new ConflictError('Email đã tồn tại trong hệ thống');
 
@@ -76,9 +83,12 @@ export const POST = withRole(
         return u;
       });
 
-      // Send welcome email async — non-blocking
+      // Send welcome email — await để biết kết quả thực tế
       const loginUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3004';
-      sendWelcomeEmail(email, fullName.trim(), plainPassword, loginUrl).catch(() => {});
+      const emailResult = await sendWelcomeEmail(email, fullName.trim(), plainPassword, loginUrl);
+      if (!emailResult.success) {
+        console.error(`[Admin] Gửi welcome email thất bại cho ${email}:`, emailResult.error);
+      }
 
       return NextResponse.json({
         success: true,
@@ -86,7 +96,8 @@ export const POST = withRole(
           id: user.id,
           email: user.email,
           fullName: user.fullName,
-          emailSent: true,
+          emailSent: emailResult.success,
+          emailError: emailResult.success ? undefined : emailResult.error,
         },
       }, { status: 201 });
     } catch (err) {
