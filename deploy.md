@@ -3,6 +3,23 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-06-29 17:30] Fix chống gian lận video — seek vẫn hoạt động bình thường
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/components/lesson/VideoPlayer.tsx` — viết lại hoàn toàn logic anti-fraud do 3 lỗi race condition:
+  1. `timeupdate` cập nhật `maxWatchedSec` ngay cả khi đang seek → pollute reference
+  2. `seeking` event fire nhiều lần khi drag → capture sai vị trí reference
+  3. Progress bar không bị disable về mặt UI → user vẫn drag được
+- Fix: thêm guard `!player.seeking()` trong `timeupdate`; dùng `isUserSeeking` ref để chỉ capture `seekStartWatched` một lần đầu mỗi lần seek; gọi `progressControl.disable()` + `pointerEvents:none` để chặn drag; block phím ArrowLeft/ArrowRight; thêm backup listener trên native video element cho HLS
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` — status online
+
+**Lưu ý / Rủi ro:**
+- Logic `isForcedSeek` đảm bảo khi hệ thống cưỡng chế currentTime() về vị trí cũ, `seeked` event KHÔNG bị xử lý như user seek
+
 ## [2026-06-29 15:00] Chia sẻ khóa học + Chống gian lận + Đánh giá chất lượng
 
 **Loại:** feature
