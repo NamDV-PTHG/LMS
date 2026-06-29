@@ -3,6 +3,425 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-06-29 15:00] Chia sẻ khóa học + Chống gian lận + Đánh giá chất lượng
+
+**Loại:** feature
+
+**Các thay đổi:**
+
+### 1. Chia sẻ khóa học giữa các công ty
+- `prisma/schema.prisma` — không thay đổi model (CoursePublication đã tồn tại); thêm quan hệ `ratings CourseRating[]` vào Course
+- `src/app/api/courses/[id]/publications/route.ts` *(mới)* — GET danh sách chia sẻ hiện tại, DELETE thu hồi chia sẻ
+- `src/services/course.service.ts` — cập nhật `getCourses` để company_admin thấy cả khóa học được chia sẻ (flag `includeShared=true`)
+- `src/app/api/courses/route.ts` — nhận param `includeShared` truyền xuống service
+- `src/app/(dashboard)/courses/[id]/page.tsx` — thêm tab "🔗 Chia sẻ với công ty" cho group_admin: danh sách công ty có checkbox, xem chia sẻ hiện tại, nút Thu hồi
+
+### 2. Chống gian lận video
+- `src/components/lesson/VideoPlayer.tsx` — thêm:
+  - Chặn forward seek vượt vị trí đã xem (buffer 3 giây)
+  - Giới hạn tốc độ phát tối đa 2x (configurable qua prop `maxPlaybackRate`)
+  - Chỉ kích hoạt `onComplete` khi xem đủ % yêu cầu (prop `requiredWatchPct`, mặc định 90%)
+  - Banner cảnh báo đỏ khi phát hiện gian lận (tự ẩn sau 3.5s)
+  - Ghi nhận vi phạm vào `trackFraud()`
+- `src/app/api/tracking/fraud/route.ts` *(mới)* — lưu fraud event vào AssetAccessLog (fire-and-forget)
+
+### 3. Đánh giá chất lượng khóa học
+- `prisma/schema.prisma` — thêm model `CourseRating` (1-5 sao, comment, unique [courseId, userId], index)
+- `src/app/api/my/courses/[id]/rate/route.ts` *(mới)* — POST gửi/cập nhật đánh giá, GET kiểm tra đã đánh giá chưa
+- `src/app/api/reports/company/[companyId]/ratings/route.ts` *(mới)* — báo cáo rating theo công ty: tổng, avg, top/bottom courses
+- `src/app/api/reports/group/ratings/route.ts` *(mới)* — báo cáo rating toàn tập đoàn
+- `src/app/(pwa)/app/courses/[courseId]/lessons/[lessonId]/page.tsx` — modal rating 5 sao + comment hiện sau khi hoàn thành bài cuối (PWA)
+- `src/app/(dashboard)/my-courses/[id]/lessons/[lessonId]/page.tsx` — tương tự cho dashboard web
+- `src/app/(dashboard)/reports/page.tsx` — thêm section đánh giá: avg rating, top/bottom rated courses (cả group và company level)
+
+**Kết quả:**
+- `prisma db push` — thành công, bảng `CourseRating` đã tạo
+- `prisma generate` — thành công (sau khi stop PM2)
+- `npm run build` — thành công, không có lỗi TypeScript/compile
+- `pm2 start lms-web lms-worker` — cả hai **online**
+
+**Lưu ý / Rủi ro:**
+- Fraud tracking dùng tạm bảng `AssetAccessLog` với userAgent JSON để phân biệt; nếu cần báo cáo gian lận chính thức nên tạo bảng `FraudLog` riêng
+- Modal rating chỉ hiện khi bài học là bài cuối cùng của khóa (nextLessonId === null); không phụ thuộc server-side check course completion
+
+## [2026-06-29] PWA Phase 9 — Profile Screen (Hồ sơ học viên)
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/api/my/profile/route.ts` — GET endpoint trả về user info + stats (total/completed/inProgress/certs/avgProgress) + danh sách chứng chỉ + 5 khóa học gần nhất
+- `src/app/(pwa)/app/profile/page.tsx` — Profile screen hoàn chỉnh:
+  - Hero gradient với nút đăng xuất góc phải
+  - Avatar (ảnh hoặc initials) float lên từ hero
+  - Thông tin jobTitle, jobLevel, email
+  - 4 stat cards: Khóa học / Đang học / Hoàn thành / Chứng chỉ
+  - Progress bar tổng thể (avgProgress)
+  - Danh sách chứng chỉ với nút tải PDF
+  - Danh sách khóa học gần đây với progress/status
+  - Bottom sheet xác nhận đăng xuất (không dùng window.confirm)
+  - Skeleton loading
+  - Empty state nếu chưa có khóa học
+
+**Kết quả:**
+- Build thành công (✓ Compiled successfully)
+- `pm2 restart lms-web` — status `online`
+- Profile accessible tại `/app/profile`
+
+**Lưu ý / Rủi ro:**
+- Certificate download mở tab mới với signed PDF URL từ `/api/my/certificates/[code]`
+- Logout dùng bottom sheet modal theo CLAUDE.md rule #5 (no window.confirm)
+
+## [2026-06-26] PWA Phase 8 — Chat (Tin nhắn)
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `prisma/schema.prisma` — thêm 3 model mới: `ChatRoom`, `ChatParticipant`, `ChatMessage`; thêm relation `chatParticipants`, `chatMessages` vào model `User`
+- `src/app/api/chat/rooms/route.ts` — GET list rooms (với last message, unread count) + POST tạo room mới
+- `src/app/api/chat/rooms/[roomId]/route.ts` — GET room detail + danh sách participants
+- `src/app/api/chat/rooms/[roomId]/messages/route.ts` — GET messages (có `?after=` ISO cho long-polling, cập nhật `lastReadAt`) + POST gửi tin nhắn
+- `src/components/pwa/chat-bubble.tsx` — component hiển thị bubble tin nhắn; style khác biệt cho `isOwn` (bg-primary) và incoming (bg-muted border)
+- `src/app/(pwa)/app/chat/page.tsx` — danh sách phòng chat; avatar thông minh (1-1 vs nhóm); last message preview; unread badge
+- `src/app/(pwa)/app/chat/[roomId]/page.tsx` — giao diện chat room; long-polling mỗi 3s với `?after=` ISO để lấy tin mới; tự động scroll; phân nhóm theo ngày; textarea auto-expand; gửi bằng Enter
+
+**Kết quả:**
+- Build thành công (✓ Compiled successfully)
+- `pm2 restart lms-web lms-worker` — cả hai `online`
+- Chat accessible tại `/app/chat` và `/app/chat/[roomId]`
+- DB đã sync: `prisma db push` + `prisma generate` (chạy sau khi stop PM2 trước đó)
+
+**Lưu ý / Rủi ro:**
+- Long-polling 3s thay vì WebSocket — đủ dùng, không cần socket.io; tải nhẹ
+- `unreadCount` trong list rooms hiện simplified (count tổng) — có thể refine sau bằng cách đếm message sau `lastReadAt`
+
+## [2026-06-26] PWA Phase 7 — Notifications
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/lib/pwa-notifications.ts` — utility derive notifications từ course data (không cần DB model):
+  - 5 loại: `overdue` / `deadline_3d` / `deadline_7d` / `mandatory_not_started` / `course_completed`
+  - Read state lưu localStorage (`pwa-notifs-read-ids`)
+  - `markAllRead()` dispatch `pwa-notifs-updated` event để BottomNav cập nhật badge
+  - `groupByDay()` group theo Hôm nay / Hôm qua / Trước đó
+  - `computeStreak()` helper cho Progress screen
+- `src/components/pwa/bottom-nav.tsx` — thêm unread badge trên Bell icon:
+  - Đọc count từ `pwa-notifs-unread-count` localStorage
+  - Listen `pwa-notifs-updated` event để real-time update
+  - Badge đỏ, hiện số (max "9+")
+- `src/components/pwa/notif-item.tsx` — notification list item:
+  - Icon theo type (AlertCircle/Clock/CheckCircle/BookOpen)
+  - Unread indicator (dot xanh + background primary-tint nhạt)
+  - Relative time (vừa xong / X phút / X giờ / X ngày trước)
+- `src/app/(pwa)/app/notifications/page.tsx` — màn hình thông báo:
+  - Header + "Đọc tất cả" button (chỉ hiện khi có unread)
+  - Unread summary pill
+  - Grouped list theo ngày với day label
+  - Empty state khi không có thông báo
+  - Mark single / mark all read → reset badge + toast
+- `src/app/(pwa)/app/notifications/loading.tsx` — skeleton
+
+**Kết quả:**
+- Build sạch; `/app/notifications` = 5.15 kB (tăng từ 1.29 kB)
+- `pm2 restart lms-web` → status online
+
+**Lưu ý / Rủi ro:**
+- Notification derive từ course data, không persist DB — mỗi lần load lại sẽ tái tính
+- Read state chỉ persist trên thiết bị (localStorage) — không sync cross-device
+- Khi có Notification model DB trong tương lai, replace `pwa-notifications.ts` với API call
+
+---
+
+## [2026-06-26] PWA Phase 6 — Progress Screen
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/(pwa)/app/progress/page.tsx` — màn hình tiến độ học tập đầy đủ:
+  - Hero gradient: % tổng thể (tính average progressPercent), streak badge tính từ completedAt dates
+  - Progress bar trắng trên gradient hero
+  - 3 stat cards: Tổng / Đang học / Hoàn thành
+  - Achievement chips: chứng chỉ / bắt buộc / giờ học / streak (chỉ hiện khi >0)
+  - Per-course sections: "Đang học" + "Chưa bắt đầu" (luôn expand) + "Đã hoàn thành" (collapsible)
+  - `CourseProgressCard`: title, progress bar thick, % + giờ + source badge (Tập đoàn/Nhóm học/Công ty), deadline warning (đỏ nếu quá hạn, vàng nếu ≤7 ngày)
+  - `DeadlineWarning`: hiện khi còn ≤7 ngày hoặc đã qua hạn
+  - `computeStreak()`: tính streak từ completedAt dates (unique days, consecutive)
+- `src/app/(pwa)/app/progress/loading.tsx` — skeleton đầy đủ
+- `src/app/(pwa)/app/progress/error.tsx` — error boundary
+
+**Kết quả:**
+- Build sạch; `/app/progress` = 4.87 kB (tăng từ 1.29 kB)
+- `pm2 restart lms-web` → status online
+
+**Lưu ý / Rủi ro:**
+- Streak tính từ completedAt (ngày hoàn thành khóa học), không phải session học hàng ngày — sẽ chính xác hơn khi có per-lesson completion tracking
+
+---
+
+## [2026-06-26] PWA Phase 5 — Quiz Engine
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/components/pwa/quiz-option.tsx` — QuizOption component với 5 trạng thái: default / selected (primary-tint) / correct (success-tint) / wrong (danger-tint) / correct-unselected (mờ xanh lá cho đáp án đúng user không chọn)
+- `src/app/(pwa)/app/courses/[courseId]/quiz/[quizId]/page.tsx` — Quiz engine đầy đủ:
+  - **States**: loading → intro → quiz → submitting → result
+  - **Intro**: cảnh báo thời gian, nút bắt đầu
+  - **Quiz**: progress steps (dot navigation), timer đếm ngược với badge đổi màu đỏ khi ≤60s, câu hỏi 1-by-1 (navigate prev/next), hiển thị độ khó (Dễ/Vừa/Khó), điểm per câu
+  - **Timer**: auto-submit khi hết giờ + toast cảnh báo
+  - **Submit**: nộp khi câu cuối hoặc "Nộp bài ngay" nếu đã trả lời hết, gọi `POST /api/quizzes/{attemptId}/submit`
+  - **Result**: score %, pass/fail hero, stats 3 cột (Đúng/Sai/Tổng), review tất cả câu với correct/wrong option highlight, "Làm lại" nếu trượt
+  - **Exit modal**: bottom sheet xác nhận thoát (không dùng confirm() — tuân thủ CLAUDE.md)
+
+**Kết quả:**
+- Build sạch; quiz route = 6.45 kB (tăng từ 1.59 kB placeholder)
+- `pm2 restart lms-web` → status online
+
+**Lưu ý / Rủi ro:**
+- API submit nhận `{answers: Record<questionId, optionKey>}` — optionKey là "A"/"B"/"C"/"D"
+- Server có 30s grace period sau hết giờ trước khi từ chối submit
+- `startQuiz` endpoint: `GET /api/quizzes/{lessonId}/start?enrollmentId=...` — quizId trong URL = lessonId
+
+---
+
+## [2026-06-26] PWA Phase 4 — Video Player
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/(pwa)/app/courses/[courseId]/lessons/[lessonId]/page.tsx` — màn hình xem bài học PWA:
+  - Header đen (sticky) với back button + lesson title
+  - Video: tái dùng `VideoPlayer` (video.js HLS) với dynamic import ssr:false; remount mỗi 15 phút (`urlKey`) để renew presigned URL
+  - PDF: `PdfEmbed` component gọi `/api/assets/{id}/view-url` → iframe
+  - Text: render HTML nội dung
+  - Tab bar: Bài học / Ghi chú
+  - Ghi chú cá nhân lưu localStorage (`pwa-lesson-notes-{lessonId}`), auto-save debounced 500ms
+  - Progress batch: queue mỗi 5s, flush mỗi 10s + flush on unmount → POST `/api/my/courses/{id}/lessons/{id}/progress`
+  - VideoPlayer.onComplete → flush 100% + mark completed
+  - Manual complete button cho text/pdf
+  - Next/prev lesson navigation cards
+  - "Next lesson bar" sticky (bottom-16) hiện sau khi hoàn thành
+- `src/app/(pwa)/app/courses/[courseId]/lessons/[lessonId]/loading.tsx` — skeleton
+- `src/app/(pwa)/app/courses/[courseId]/lessons/[lessonId]/error.tsx` — error boundary
+- `src/app/(pwa)/app/courses/[courseId]/quiz/[quizId]/page.tsx` — placeholder quiz route (Phase 5 implement đầy đủ)
+
+**Kết quả:**
+- Build sạch; lesson player = 6.7 kB (dynamic), quiz placeholder = 1.59 kB
+- `pm2 restart lms-web` → status online
+
+**Lưu ý / Rủi ro:**
+- HLS manifest proxy (`/api/assets/{id}/manifest`) không cần renewal — server-side signing
+- Direct MP4 URL: Redis cache 1080s (18 min); remount VideoPlayer sau 15 min đảm bảo URL còn hạn
+- Tracking video events vẫn qua `/api/tracking/video` (heartbeat từ VideoPlayer); progress % riêng qua lesson progress API
+
+---
+
+## [2026-06-26] PWA Phase 3 — Course Detail + Lesson List
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/components/pwa/lesson-item.tsx` — LessonItem với 3 trạng thái: done (check xanh) / active (số có viền primary) / locked (số xám); phân loại icon theo contentType (video/pdf/quiz); auto-build href đúng
+- `src/components/pwa/skeleton/lesson-skeleton.tsx` — skeleton cho LessonItem + CourseDetailSkeleton
+- `src/app/(pwa)/app/courses/[courseId]/page.tsx` — màn hình chi tiết khóa học: hero ảnh/gradient, back button overlay, info block, progress bar, nút "Bắt đầu học" (auto-enroll), tab bar (Nội dung / Tài liệu / Kiểm tra), danh sách section + lesson với trạng thái, mô tả
+- `src/app/(pwa)/app/courses/[courseId]/loading.tsx` — skeleton loading
+- `src/app/(pwa)/app/courses/[courseId]/error.tsx` — error boundary với nút quay lại + thử lại
+- `src/app/(pwa)/app/courses/page.tsx` — nâng cấp từ placeholder thành màn hình đầy đủ: search bar, filter tabs (Tất cả / Đang học / Chưa bắt đầu / Hoàn thành), danh sách CourseListItem
+
+**Kết quả:**
+- Build sạch; `/app/courses` = 1.8 kB, `/app/courses/[courseId]` = 5.61 kB (dynamic)
+- `pm2 restart lms-web` → status online
+
+**Lưu ý / Rủi ro:**
+- Lesson status logic: sequential mode khóa bài tiếp theo nếu bài trước chưa done; free mode mọi bài đều active sau khi enroll
+
+---
+
+## [2026-06-26] PWA Phase 2 — Home Screen
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/(pwa)/layout.tsx` — thêm `AuthProvider` + `ToastProvider` wrap
+- `src/app/(pwa)/app/home/page.tsx` — màn hình trang chủ đầy đủ: hero gradient, stat cards (3 cột), ContinueCard, danh sách đang học, chưa bắt đầu; redirect về `/login` nếu chưa auth
+- `src/app/(pwa)/app/home/loading.tsx` — skeleton đầy đủ tương ứng với layout thật
+- `src/components/pwa/progress-bar.tsx` — reusable progress bar (thin/thick variant)
+- `src/components/pwa/course-card.tsx` — `ContinueCard` (large) + `CourseListItem` (compact) với deadline badge, mandatory badge, progress bar
+- `src/components/pwa/skeleton/course-skeleton.tsx` — skeleton cho cả 2 card variant
+
+**Kết quả:**
+- Build sạch, `/app/home` = 4.31 kB (tăng từ 1.28 kB)
+- `pm2 restart lms-web` → status online
+
+**Lưu ý / Rủi ro:**
+- Data fetch qua `useAuth()` → accessToken → `/api/my/courses`; nếu token hết hạn sẽ auto-refresh theo logic AuthProvider
+
+---
+
+## [2026-06-26] PWA Phase 1 — Scaffold + Layout
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/(pwa)/layout.tsx` — PWA route group layout: Inter font, PWA metadata, viewport, BottomNav
+- `src/app/(pwa)/app/page.tsx` — redirect `/app` → `/app/home`
+- `src/app/(pwa)/app/home/page.tsx` — placeholder trang chủ
+- `src/app/(pwa)/app/home/loading.tsx` — skeleton loading state
+- `src/app/(pwa)/app/home/error.tsx` — error boundary
+- `src/app/(pwa)/app/courses/page.tsx` — placeholder khóa học
+- `src/app/(pwa)/app/progress/page.tsx` — placeholder tiến độ
+- `src/app/(pwa)/app/notifications/page.tsx` — placeholder thông báo
+- `src/app/(pwa)/app/profile/page.tsx` — placeholder hồ sơ
+- `src/components/pwa/bottom-nav.tsx` — bottom nav 5 tabs, active state, safe area inset
+- `src/components/pwa/pwa-header.tsx` — header với back button + title slot
+- `public/manifest.json` — PWA manifest (start_url: /app/home, theme: #185FA5)
+- `public/sw.js` — service worker cache shell + offline fallback
+
+**Kết quả:**
+- Build thành công, routes `/app/home`, `/app/courses`, `/app/progress`, `/app/notifications`, `/app/profile` live
+- `pm2 restart lms-web` → status online
+
+**Lưu ý / Rủi ro:**
+- Cần tạo icon-192.png và icon-512.png trong `public/icons/` để PWA install hoạt động đầy đủ
+- Service worker chỉ cache shell, chưa có offline page riêng
+
+---
+
+## [2026-06-26 15:25] Fix đăng nhập thất bại: Redis + Tailwind CSS + auth degraded mode
+
+**Loại:** fix + deploy
+
+**Các thay đổi:**
+- **Redis** — Cài đặt Redis 5.0.14 (tporadowski/redis) vào `C:\Redis\`, đăng ký như Windows Service (`redis-server --service-install`). Redis đã chạy và PING thành công.
+- `src/services/auth.service.ts` — Fix `refresh()`: chỉ ném lỗi 401 khi Redis trả về token cụ thể và không khớp. Nếu Redis trả về `null` (không chạy hoặc chưa có token), vẫn cho phép refresh dựa vào JWT signature. Trước đây: `null !== refreshToken` → 401 ngay sau login.
+- `tailwind.config.ts` — Thêm mapping CSS variables shadcn/ui (`background`, `foreground`, `card`, `popover`, `secondary`, `muted`, `accent`, `destructive`, `input`, `ring`) để `@apply bg-background text-foreground` trong globals.css không bị lỗi "class does not exist" khi build không có cache.
+- Sửa `border.DEFAULT` từ `rgba(0,0,0,0.08)` thành `hsl(var(--border))` (đổi tên sang `border.subtle` để vẫn dùng được).
+
+**Kết quả:**
+- Build thành công sau khi xóa cache, `pm2 restart lms-web` → online
+- Redis online, không còn lỗi trong log
+- Đăng nhập qua domain hoạt động bình thường
+
+**Lưu ý / Rủi ro:**
+- Redis Service đã cài và start. Nếu server restart, Redis sẽ tự động start lại (đã đăng ký service).
+- Nếu có class Tailwind dùng `border` (không phải `border-subtle`), màu sẽ đổi từ `rgba(0,0,0,0.08)` sang `hsl(var(--border))` — cần kiểm tra UI thực tế.
+
+## [2026-06-25 10:45] Fix SMTP port sai — email không gửi được
+
+**Loại:** config
+
+**Các thay đổi:**
+- `SmtpConfig` (DB) — Sửa `port` từ 995 (POP3S — nhận mail) thành 465 (SMTPS — gửi mail). Port 995 khiến nodemailer nhận phản hồi POP3 thay vì SMTP greeting → lỗi EPROTOCOL. Port 465 và 587 đều kết nối thành công; chọn 465 vì `secure = true` đã đúng.
+- Gửi test email đến `nam.dv@kowil.com.vn` thành công (response `250 2.6.0 Ok`).
+- `pm2 restart lms-web` để xóa cache SMTP transporter trong memory.
+
+**Kết quả:**
+- Email hoạt động, `nam.dv@kowil.com.vn` đã nhận được email test
+- Mọi chức năng gửi mail (welcome, reset password, invite) giờ hoạt động bình thường
+
+**Lưu ý / Rủi ro:**
+- Trong giao diện Cài đặt → Mail Server, cần sửa port hiển thị thành 465 để khớp với thực tế trong DB
+
+## [2026-06-25 10:30] Fix lỗi học viên xem khóa học + email admin + xác thực email domain
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/enrollment.service.ts` — Fix lỗi nghiêm trọng: raw SQL dùng `"Section"` nhưng tên bảng thực trong PostgreSQL là `"CourseSection"` → gây crash `P2010` cho mọi học viên khi vào khóa học. Đã đổi thành `"CourseSection"`.
+- `src/app/api/organizations/[id]/admin/route.ts` — (1) Thêm xác thực MX record qua `checkEmailDomain()` trước khi tạo admin (giống `/api/users`). (2) Await `sendWelcomeEmail()` thay vì fire-and-forget, trả về `emailSent: true/false` và `emailError` thực tế thay vì luôn `true`.
+- `src/app/(dashboard)/organizations/[id]/page.tsx` — Cập nhật thông báo tạo admin: phân biệt email gửi thành công / thất bại (kèm lý do như "SMTP chưa cấu hình").
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → status online
+- Học viên có thể xem khóa học không còn bị lỗi hệ thống
+- Tạo admin sẽ báo đúng trạng thái email
+
+**Lưu ý / Rủi ro:**
+- Bảng `SmtpConfig` trong DB hiện TRỐNG — SMTP chưa được cấu hình. Đây là nguyên nhân email `nam.dv@kowil.com.vn` không nhận được. Cần vào **Cài đặt → Cấu hình Email (SMTP)** để nhập thông tin máy chủ email và test gửi trước khi tạo user tiếp theo.
+
+## [2026-06-25 10:00] Fix 3 lỗi: vận hành hệ thống, tạo company_admin, phân tách user theo công ty
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/api/admin/operations/route.ts` — Fix crash: prisma query dùng sai tên relation (`userRoles` → `users`) và field không tồn tại (`isActive` trên `UserRole`). Sửa bằng cách bỏ `_count`, thêm `prisma.user.count()` riêng per company với filter `roles.some { organization: { OR: [{ id }, { companyId }] } }`. Đồng thời tính enrollment và completion per company.
+- `src/services/user.service.ts` — Thêm param `filterCompanyId?: string | null` để group_admin có thể lọc user theo từng công ty cụ thể. Logic: `effectiveCompanyId = isGroupAdmin ? (filterCompanyId ?? null) : companyId`; `applyOrgFilter = !isGroupAdmin || !!filterCompanyId`. Thêm `companyId` vào organization select.
+- `src/app/api/users/route.ts` — GET handler trích xuất `filterCompanyId` từ query string (chỉ cho group_admin), truyền vào `getUsers()`.
+- `src/app/(dashboard)/users/page.tsx` — Thêm dropdown lọc theo công ty (chỉ hiện với group_admin). Thêm cột "Công ty" trong bảng. Hàm `getUserCompany()` lấy tên công ty từ role. Hiển thị đếm "N người dùng (tất cả / đã lọc)".
+- `src/app/(dashboard)/organizations/[id]/page.tsx` — Fix `loadUsers()`: dùng `filterCompanyId` cho org loại company, `deptId` cho dept/team. Thêm section "Tạo quản trị viên" (amber box, chỉ hiện group_admin + company org): form tạo company_admin qua endpoint `/api/organizations/${id}/admin`.
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → status online
+- Menu "Vận hành hệ thống" không còn báo lỗi
+- group_admin có thể chọn công ty để lọc user và tạo company_admin
+
+**Lưu ý / Rủi ro:**
+- Vấn đề tenant isolation ở cấp dữ liệu (user được gán vào sai org khi tạo trước đây) cần kiểm tra lại bằng SQL. Code logic đã đúng.
+
+## [2026-06-24 XX:XX] Fix 6 lỗi: sidebar động, branding công ty, tenant isolation, nhóm ngoài hệ thống
+
+**Loại:** fix + feature
+
+**Các thay đổi:**
+- `src/app/api/me/company/route.ts` — NEW: endpoint trả về branding (tên, logo, màu) của công ty người dùng hiện tại. Accessible cho mọi role.
+- `src/app/(dashboard)/layout.tsx` — Sidebar hiển thị logo công ty (nếu có) hoặc tên công ty thay vì hardcode "Tập đoàn". Áp dụng CSS variable `--color-primary` từ metadata công ty.
+- `src/services/organization.service.ts` — Fix bug: khi tạo org loại 'company', trường `companyId` được set đúng = id của chính org đó (sau khi tạo), thay vì sai = parentId. Dùng transaction để update ngay sau khi create.
+- `src/services/user.service.ts` — Thêm guard: nếu `companyId` rỗng và không phải group_admin → trả về mảng rỗng, tránh trường hợp trả về tất cả user.
+- `src/app/api/learning-groups/[id]/members/[userId]/route.ts` — Fix: thêm `company_admin` và `hr_manager` vào quyền xóa member (trước chỉ có group_admin/group_hrm).
+- `src/app/api/learning-groups/[id]/members/import/route.ts` — NEW: GET tải file mẫu CSV, POST bulk import email từ CSV/Excel (tối đa 200), gọi `addMember()` cho từng email.
+- `src/components/learning-group/external-member-search.tsx` — Thêm UI import từ file (download template, upload CSV/Excel, hiển thị kết quả chi tiết). Fix UI delete button vẫn hiển thị đúng.
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → status online
+- Sidebar giờ hiển thị "LMS + logo công ty" hoặc "LMS + tên công ty"
+- Màu chủ đạo (primaryColor) từ cài đặt công ty được áp dụng tự động vào dashboard
+- Xóa member nhóm ngoài hệ thống hoạt động cho company_admin và hr_manager
+- Import hàng loạt email vào nhóm external qua CSV/Excel
+
+**Lưu ý / Rủi ro:**
+- Org 'company' mới tạo sau fix này sẽ có `companyId = id riêng`. Org cũ vẫn dùng cấu trúc cũ — không ảnh hưởng query vì check `OR [id, companyId]`.
+- Tenant isolation bug (3 công ty đều thấy user CTA) có thể là vấn đề dữ liệu (user được assign vào sai org). Code logic đã được kiểm tra là đúng. Đã thêm guard `companyId` rỗng.
+
+## [2026-06-25] Fix AI import tài liệu: bỏ FastAPI, xử lý trực tiếp trong Next.js
+
+**Loại:** fix + refactor
+
+**Nguyên nhân gốc:** FastAPI AI service không chạy (không có trong PM2). Health check phát hiện đúng nhưng giải pháp đúng là loại bỏ dependency vào FastAPI cho tính năng này.
+
+**Các thay đổi:**
+- `npm install pdf-parse mammoth jszip @types/pdf-parse @types/jszip` — packages parse tài liệu
+- `src/services/ai-document-processor.ts` (mới) — Xử lý toàn bộ pipeline trực tiếp trong Node.js:
+  - PDF: dùng `pdf-parse`
+  - DOCX: dùng `mammoth`
+  - PPTX: dùng `jszip` đọc XML slide
+  - Tách text thành chunks ~2000 ký tự theo đoạn văn
+  - Gọi LLM qua OpenAI-compatible API (`{endpoint}/chat/completions`) với model từ `AiServiceConfig`
+  - Parse JSON response, save câu hỏi vào DB với status `review`
+  - Update tiến độ sau mỗi chunk, xử lý tối đa 8 chunks
+- `src/app/api/question-banks/[id]/import-document/route.ts` — Pre-flight check: verify có AI config active trước khi tạo job; fire-and-forget qua `setImmediate()` thay vì gọi FastAPI
+
+**Kết quả:** build ✓, pm2 lms-web online. Document import giờ hoạt động với bất kỳ AI endpoint OpenAI-compatible nào được cấu hình.
+
+## [2026-06-25] 3 fixes: AI import lỗi rõ ràng, template CSV font, dashboard vận hành
+
+**Loại:** fix + feature
+
+**AI Import câu hỏi từ tài liệu:**
+- `import-document/route.ts` — Health check đồng bộ tới AI service trước khi tạo job; nếu down báo lỗi ngay. Fetch fail → mark job `failed` với message cụ thể
+- `question-bank.service.ts` — Thêm `markImportJobFailed()`
+- `import-document-modal.tsx` — Timeout 8 phút, elapsed timer, hướng dẫn khắc phục trong màn lỗi
+
+**Template CSV câu hỏi:**
+- `import-csv/route.ts` — Thêm UTF-8 BOM vào đầu CSV → Excel Windows đọc tiếng Việt đúng
+
+**Dashboard vận hành (mới - group_admin):**
+- `require-role.ts` — Redis key `online:{userId}` TTL 15 phút mỗi request xác thực
+- `api/admin/operations/route.ts` — API: RAM/uptime/Node, online users từ Redis, DB stats per company
+- `(dashboard)/operations/page.tsx` — Dashboard tự làm mới 30s: memory bars, online users, bảng công ty
+- `layout.tsx` — Nav link "Vận hành hệ thống" cho group_admin
+
+**Kết quả:** build ✓, pm2 lms-web online
+
 ## [2026-06-25 00:30] Fix 4 issues: file upload wizard, tạo admin công ty, nút chỉnh sửa, nhóm học tập
 
 **Loại:** fix + feature

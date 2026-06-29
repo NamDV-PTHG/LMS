@@ -9,9 +9,10 @@ export const GET = withAuth(async (req, { user, companyId }) => {
   const page = parseInt(sp.get('page') ?? '1', 10);
   const limit = Math.min(parseInt(sp.get('limit') ?? '20', 10), 100);
   const published = sp.has('published') ? sp.get('published') === 'true' : undefined;
+  const includeShared = sp.get('includeShared') === 'true';
 
   const isGroupAdmin = user.roles.includes('group_admin');
-  const result = await getCourses(companyId, isGroupAdmin, { page, limit, published });
+  const result = await getCourses(companyId, isGroupAdmin, { page, limit, published, includeShared });
   return NextResponse.json({ success: true, data: result.items, meta: result });
 });
 

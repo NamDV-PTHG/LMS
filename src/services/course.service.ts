@@ -84,14 +84,42 @@ async function assertCourseAccess(
 export async function getCourses(
   companyId: string,
   isGroupAdmin: boolean,
-  filters: { page: number; limit: number; published?: boolean },
+  filters: { page: number; limit: number; published?: boolean; includeShared?: boolean },
 ) {
-  const { page, limit, published } = filters;
-  const where: Record<string, unknown> = {
-    isActive: true,
-    ...(isGroupAdmin ? {} : { ownerCompanyId: companyId }),
-    ...(published !== undefined ? { isPublished: published } : {}),
-  };
+  const { page, limit, published, includeShared } = filters;
+
+  // Với group_admin: xem tất cả khóa học
+  // Với company_admin/instructor: xem khóa học của công ty + khóa học được chia sẻ
+  let where: Record<string, unknown>;
+
+  if (isGroupAdmin) {
+    where = {
+      isActive: true,
+      ...(published !== undefined ? { isPublished: published } : {}),
+    };
+  } else if (includeShared) {
+    // Lấy danh sách courseId được chia sẻ với công ty này
+    const sharedPubs = await prisma.coursePublication.findMany({
+      where: { targetCompanyId: companyId, revokedAt: null },
+      select: { courseId: true },
+    });
+    const sharedCourseIds = sharedPubs.map((p) => p.courseId);
+
+    where = {
+      isActive: true,
+      ...(published !== undefined ? { isPublished: published } : {}),
+      OR: [
+        { ownerCompanyId: companyId },
+        ...(sharedCourseIds.length > 0 ? [{ id: { in: sharedCourseIds } }] : []),
+      ],
+    };
+  } else {
+    where = {
+      isActive: true,
+      ownerCompanyId: companyId,
+      ...(published !== undefined ? { isPublished: published } : {}),
+    };
+  }
 
   const [items, total] = await Promise.all([
     prisma.course.findMany({
@@ -102,6 +130,10 @@ export async function getCourses(
         createdAt: true, updatedAt: true,
         ownerCompany: { select: { id: true, name: true } },
         _count: { select: { sections: true, enrollments: true } },
+        publications: {
+          where: { targetCompanyId: companyId, revokedAt: null },
+          select: { id: true },
+        },
       },
       orderBy: { updatedAt: 'desc' },
       skip: (page - 1) * limit,
@@ -110,7 +142,14 @@ export async function getCourses(
     prisma.course.count({ where }),
   ]);
 
-  return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
+  // Gắn flag isShared cho mỗi khóa học
+  const itemsWithFlag = items.map((c) => ({
+    ...c,
+    isShared: c.ownerCompanyId !== companyId,
+    publications: undefined, // không expose raw relation
+  }));
+
+  return { items: itemsWithFlag, total, page, limit, totalPages: Math.ceil(total / limit) };
 }
 
 export async function getCourse(courseId: string, companyId: string, userId: string, roles: RoleType[]) {

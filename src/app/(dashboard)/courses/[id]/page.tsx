@@ -47,6 +47,15 @@ interface Organization {
   type: string;
 }
 
+interface CoursePublication {
+  id: string;
+  targetCompany: { id: string; name: string; code: string };
+  publisher: { id: string; fullName: string };
+  isMandatory: boolean;
+  deadline: string | null;
+  publishedAt: string;
+}
+
 const CONTENT_TYPE_ICON: Record<string, string> = {
   video: '▶',
   pdf: '📄',
@@ -77,7 +86,7 @@ export default function CourseEditorPage() {
   const isGroupAdmin = userRoles.includes('group_admin') || userRoles.includes('group_hrm');
   const isCompanyAdmin = userRoles.includes('company_admin') || userRoles.includes('hr_manager');
 
-  const [activeTab, setActiveTab] = useState<'content' | 'assign'>('content');
+  const [activeTab, setActiveTab] = useState<'content' | 'assign' | 'share'>('content');
   const [course, setCourse] = useState<Course | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +115,15 @@ export default function CourseEditorPage() {
   const [editingLessonSectionId, setEditingLessonSectionId] = useState<string | null>(null);
   const [editLessonValue, setEditLessonValue] = useState('');
   const [savingLesson, setSavingLesson] = useState(false);
+
+  // Share tab state (group_admin)
+  const [shareCompanies, setShareCompanies] = useState<Organization[]>([]);
+  const [publications, setPublications] = useState<CoursePublication[]>([]);
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(new Set());
+  const [shareDeadline, setShareDeadline] = useState('');
+  const [shareMandatory, setShareMandatory] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
 
   // Quiz import state
   const [importingLessonId, setImportingLessonId] = useState<string | null>(null);
@@ -162,8 +180,78 @@ export default function CourseEditorPage() {
       .catch(() => {});
   };
 
+  const loadShareData = () => {
+    if (!accessToken || !id) return;
+    const h = { Authorization: `Bearer ${accessToken}` };
+    // Tải danh sách công ty (type=company)
+    fetch('/api/organizations?type=company', { headers: h })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setShareCompanies((res.data ?? []).filter((o: Organization) => o.type === 'company'));
+      })
+      .catch(() => {});
+    // Tải danh sách chia sẻ hiện tại
+    fetch(`/api/courses/${id}/publications`, { headers: h })
+      .then((r) => r.json())
+      .then((res) => { if (res.success) setPublications(res.data ?? []); })
+      .catch(() => {});
+  };
+
+  const handleShare = async () => {
+    if (selectedCompanyIds.size === 0) { toast('error', 'Chọn ít nhất một công ty'); return; }
+    setSharing(true);
+    try {
+      const res = await fetch(`/api/courses/${id}/publish`, {
+        method: 'POST',
+        headers: authHeader,
+        body: JSON.stringify({
+          targetCompanyIds: Array.from(selectedCompanyIds),
+          isMandatory: shareMandatory,
+          deadline: shareDeadline ? new Date(shareDeadline).toISOString() : undefined,
+        }),
+      }).then((r) => r.json());
+      if (res.success) {
+        toast('success', `Đã chia sẻ khóa học với ${selectedCompanyIds.size} công ty`);
+        setSelectedCompanyIds(new Set());
+        setShareDeadline('');
+        setShareMandatory(false);
+        loadShareData();
+      } else {
+        toast('error', res.error ?? 'Chia sẻ thất bại');
+      }
+    } catch { toast('error', 'Lỗi kết nối'); }
+    finally { setSharing(false); }
+  };
+
+  const handleRevoke = async (publicationId: string) => {
+    setRevoking(publicationId);
+    try {
+      const res = await fetch(`/api/courses/${id}/publications`, {
+        method: 'DELETE',
+        headers: authHeader,
+        body: JSON.stringify({ publicationId }),
+      }).then((r) => r.json());
+      if (res.success) {
+        toast('success', 'Đã thu hồi chia sẻ');
+        loadShareData();
+      } else {
+        toast('error', res.error ?? 'Thu hồi thất bại');
+      }
+    } catch { toast('error', 'Lỗi kết nối'); }
+    finally { setRevoking(null); }
+  };
+
+  const toggleCompanySelect = (companyId: string) => {
+    setSelectedCompanyIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(companyId)) next.delete(companyId); else next.add(companyId);
+      return next;
+    });
+  };
+
   useEffect(() => { if (accessToken && id) load(); }, [accessToken, id]); // eslint-disable-line
   useEffect(() => { if (activeTab === 'assign') loadAssignData(); }, [activeTab, accessToken]); // eslint-disable-line
+  useEffect(() => { if (activeTab === 'share' && isGroupAdmin) loadShareData(); }, [activeTab, accessToken, id]); // eslint-disable-line
 
   // ── Content tab handlers ──────────────────────────────────────
 
@@ -521,12 +609,16 @@ export default function CourseEditorPage() {
 
       {/* Tabs */}
       <div className="border-b flex gap-1">
-        {(['content', 'assign'] as const).map((tab) => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
+        {[
+          { key: 'content', label: '📚 Nội dung bài giảng', show: true },
+          { key: 'assign',  label: '📤 Phân phối & Giao học', show: true },
+          { key: 'share',   label: '🔗 Chia sẻ với công ty', show: isGroupAdmin },
+        ].filter((t) => t.show).map((tab) => (
+          <button key={tab.key} onClick={() => setActiveTab(tab.key as typeof activeTab)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+              activeTab === tab.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}>
-            {tab === 'content' ? '📚 Nội dung bài giảng' : '📤 Phân phối & Giao học'}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -851,6 +943,110 @@ export default function CourseEditorPage() {
               <li><strong>Phòng ban</strong> — Company Admin / HR Manager giao cho toàn phòng ban hoặc công ty (cơ chế company_assign)</li>
               <li><strong>Cá nhân</strong> — Giao trực tiếp cho từng nhân viên, có thể đặt hạn và đánh dấu bắt buộc</li>
               <li>Học viên thấy khóa học trong <strong>Khóa học của tôi</strong> sau khi được giao</li>
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tab: Chia sẻ với công ty (group_admin only) ── */}
+      {activeTab === 'share' && isGroupAdmin && (
+        <div className="space-y-6">
+          {!course.isPublished && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+              ⚠ Khóa học cần được xuất bản trước khi chia sẻ. Hãy <button onClick={() => setActiveTab('content')} className="underline font-medium">xuất bản</button> trước.
+            </div>
+          )}
+
+          {/* Danh sách đang được chia sẻ */}
+          {publications.length > 0 && (
+            <div className="bg-white rounded-xl border p-6 space-y-4">
+              <h2 className="font-semibold text-gray-800">Đang chia sẻ với ({publications.length} công ty)</h2>
+              <div className="divide-y">
+                {publications.map((pub) => (
+                  <div key={pub.id} className="flex items-center justify-between py-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">{pub.targetCompany.name}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Chia sẻ bởi {pub.publisher.fullName} · {new Date(pub.publishedAt).toLocaleDateString('vi-VN')}
+                        {pub.isMandatory && <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-medium">Bắt buộc</span>}
+                        {pub.deadline && <span className="ml-2 text-gray-400">Hạn: {new Date(pub.deadline).toLocaleDateString('vi-VN')}</span>}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleRevoke(pub.id)}
+                      disabled={revoking === pub.id}
+                      className="text-xs text-red-600 hover:text-red-800 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+                    >
+                      {revoking === pub.id ? '...' : 'Thu hồi'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Chia sẻ với công ty mới */}
+          <div className="bg-white rounded-xl border p-6 space-y-5">
+            <h2 className="font-semibold text-gray-800">Chia sẻ với công ty</h2>
+
+            {/* Danh sách công ty */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Chọn công ty <span className="text-red-500">*</span></label>
+              {shareCompanies.length === 0 ? (
+                <p className="text-sm text-gray-400">Không có công ty nào trong hệ thống</p>
+              ) : (
+                <div className="border rounded-lg divide-y max-h-60 overflow-y-auto">
+                  {shareCompanies
+                    .filter((c) => !publications.some((p) => p.targetCompany.id === c.id))
+                    .map((company) => (
+                    <label key={company.id}
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={selectedCompanyIds.has(company.id)}
+                        onChange={() => toggleCompanySelect(company.id)}
+                        className="w-4 h-4 rounded accent-blue-600"
+                      />
+                      <span className="text-sm text-gray-800">{company.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {selectedCompanyIds.size > 0 && (
+                <p className="text-xs text-blue-600 font-medium">Đã chọn {selectedCompanyIds.size} công ty</p>
+              )}
+            </div>
+
+            <div className="flex items-end gap-4 flex-wrap">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Hạn hoàn thành (tùy chọn)</label>
+                <input type="date" value={shareDeadline} onChange={(e) => setShareDeadline(e.target.value)}
+                  className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <label className="flex items-center gap-2 mb-2 cursor-pointer select-none">
+                <input type="checkbox" checked={shareMandatory} onChange={(e) => setShareMandatory(e.target.checked)}
+                  className="w-4 h-4 rounded accent-blue-600" />
+                <span className="text-sm text-gray-700">Bắt buộc</span>
+              </label>
+            </div>
+
+            <button
+              onClick={handleShare}
+              disabled={sharing || selectedCompanyIds.size === 0 || !course.isPublished}
+              className="px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {sharing ? 'Đang chia sẻ...' : `🔗 Chia sẻ với ${selectedCompanyIds.size > 0 ? selectedCompanyIds.size + ' ' : ''}công ty`}
+            </button>
+          </div>
+
+          {/* Info */}
+          <div className="bg-gray-50 rounded-xl border p-4 text-sm text-gray-600 space-y-1">
+            <p className="font-medium text-gray-800">Sau khi chia sẻ:</p>
+            <ul className="text-xs list-disc pl-4 space-y-1">
+              <li>Công ty được chia sẻ có thể gán khóa học này cho nhân viên hoặc phòng ban</li>
+              <li>Khóa học được chia sẻ hiển thị trong danh sách "Khóa học" của company_admin</li>
+              <li>Nội dung khóa học vẫn do tập đoàn sở hữu — công ty không thể chỉnh sửa</li>
+              <li>Thu hồi chia sẻ sẽ ngừng hiển thị khóa học, nhưng không xóa tiến độ học của nhân viên</li>
             </ul>
           </div>
         </div>

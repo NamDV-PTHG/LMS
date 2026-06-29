@@ -58,6 +58,13 @@ export default function LessonPlayerPage() {
   const [completing, setCompleting] = useState(false);
   const [completed, setCompleted] = useState(false);
 
+  // Rating modal
+  const [showRating, setShowRating] = useState(false);
+  const [ratingValue, setRatingValue] = useState(0);
+  const [ratingComment, setRatingComment] = useState('');
+  const [submittingRating, setSubmittingRating] = useState(false);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+
   // Quiz state
   const [quizAttempt, setQuizAttempt] = useState<QuizAttempt | null>(null);
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
@@ -104,6 +111,18 @@ export default function LessonPlayerPage() {
       .finally(() => setIsLoading(false));
   }, [accessToken, courseId, lessonId]); // eslint-disable-line
 
+  const checkAndShowRating = async (isLastLesson: boolean) => {
+    if (!isLastLesson || !accessToken || !courseId) return;
+    try {
+      const res = await fetch(`/api/my/courses/${courseId}/rate`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).then((r) => r.json());
+      if (res.success && !res.data) {
+        setTimeout(() => setShowRating(true), 1200);
+      }
+    } catch { /* ignore */ }
+  };
+
   const handleComplete = async () => {
     if (!lesson || completing) return;
     setCompleting(true);
@@ -114,10 +133,39 @@ export default function LessonPlayerPage() {
         body: JSON.stringify({ progressPct: 100, status: 'completed' }),
       });
       setCompleted(true);
+      if (!lesson.nextLessonId) {
+        checkAndShowRating(true);
+      }
     } catch {
       // silent
     } finally {
       setCompleting(false);
+    }
+  };
+
+  const handleSubmitRating = async () => {
+    if (!ratingValue || ratingValue < 1 || ratingValue > 5) {
+      toast('error', 'Vui lòng chọn số sao đánh giá');
+      return;
+    }
+    setSubmittingRating(true);
+    try {
+      const res = await fetch(`/api/my/courses/${courseId}/rate`, {
+        method: 'POST',
+        headers: authHeader,
+        body: JSON.stringify({ rating: ratingValue, comment: ratingComment }),
+      }).then((r) => r.json());
+      if (res.success) {
+        setRatingSubmitted(true);
+        toast('success', 'Cảm ơn bạn đã đánh giá khóa học!');
+        setTimeout(() => setShowRating(false), 1500);
+      } else {
+        toast('error', res.error ?? 'Gửi đánh giá thất bại');
+      }
+    } catch {
+      toast('error', 'Lỗi kết nối');
+    } finally {
+      setSubmittingRating(false);
     }
   };
 
@@ -370,6 +418,76 @@ export default function LessonPlayerPage() {
               Bài tiếp theo →
             </Link>
           )}
+        </div>
+      )}
+
+      {/* ── Modal đánh giá khóa học ── */}
+      {showRating && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
+            {ratingSubmitted ? (
+              <div className="px-8 py-10 flex flex-col items-center gap-4 text-center">
+                <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center text-3xl">✓</div>
+                <p className="text-lg font-semibold text-gray-900">Cảm ơn đánh giá của bạn!</p>
+                <p className="text-sm text-gray-500">Phản hồi của bạn giúp cải thiện chất lượng đào tạo</p>
+              </div>
+            ) : (
+              <div className="p-6 space-y-5">
+                <div className="text-center space-y-1">
+                  <p className="text-lg font-semibold text-gray-900">Đánh giá khóa học</p>
+                  <p className="text-sm text-gray-500">Bạn thấy khóa học này như thế nào?</p>
+                </div>
+
+                {/* 5 sao */}
+                <div className="flex justify-center gap-3">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      onClick={() => setRatingValue(star)}
+                      className={`text-4xl transition-all hover:scale-110 ${
+                        star <= ratingValue ? 'text-yellow-400' : 'text-gray-200'
+                      }`}
+                    >
+                      ★
+                    </button>
+                  ))}
+                </div>
+                {ratingValue > 0 && (
+                  <p className="text-center text-sm text-gray-600 font-medium">
+                    {['', 'Rất tệ', 'Không tốt', 'Bình thường', 'Tốt', 'Xuất sắc'][ratingValue]}
+                  </p>
+                )}
+
+                {/* Comment */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Nhận xét (tùy chọn)</label>
+                  <textarea
+                    value={ratingComment}
+                    onChange={(e) => setRatingComment(e.target.value)}
+                    placeholder="Chia sẻ trải nghiệm của bạn về khóa học..."
+                    rows={3}
+                    className="w-full border rounded-lg px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-1">
+                  <button
+                    onClick={() => setShowRating(false)}
+                    className="flex-1 py-2.5 border text-sm font-medium text-gray-600 rounded-lg hover:bg-gray-50"
+                  >
+                    Bỏ qua
+                  </button>
+                  <button
+                    onClick={handleSubmitRating}
+                    disabled={submittingRating || ratingValue === 0}
+                    className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {submittingRating ? 'Đang gửi...' : 'Gửi đánh giá'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

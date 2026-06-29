@@ -86,7 +86,10 @@ model User {
   publishedCourses    CoursePublication[]     @relation("PublishedCourses")
   assignedCourses     CourseAssignment[]      @relation("AssignedCourses")
   contentRatings      ContentRating[]
+  courseRatings       CourseRating[]
   passwordResetTokens PasswordResetToken[]
+  chatParticipants    ChatParticipant[]
+  chatMessages        ChatMessage[]
 }
 
 model UserRole {
@@ -141,6 +144,7 @@ model Course {
   groupCourses    GroupCourse[]
   publications    CoursePublication[]
   assignments     CourseAssignment[]
+  ratings         CourseRating[]
 }
 
 // Cơ chế ①: group_admin publish xuống công ty
@@ -493,6 +497,25 @@ model ContentRating {
   user  User         @relation(fields: [userId], references: [id])
 
   @@unique([assetId, userId])
+}
+
+// Đánh giá chất lượng khóa học sau khi hoàn thành
+model CourseRating {
+  id           String   @id @default(uuid())
+  courseId     String
+  userId       String
+  enrollmentId String?
+  rating       Int      // 1-5 sao
+  comment      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  course Course @relation(fields: [courseId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([courseId, userId])
+  @@index([courseId])
+  @@index([userId])
 }
 
 // ============================================================
@@ -1017,4 +1040,53 @@ model PasswordResetToken {
 
   @@index([token])
   @@index([userId])
+}
+
+// ============================================================
+// CHAT
+// ============================================================
+
+model ChatRoom {
+  id          String   @id @default(uuid())
+  companyId   String
+  courseId    String?
+  title       String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  messages     ChatMessage[]
+  participants ChatParticipant[]
+
+  @@index([companyId])
+  @@index([courseId])
+}
+
+model ChatParticipant {
+  id         String    @id @default(uuid())
+  roomId     String
+  userId     String
+  role       String    @default("member")  // "member" | "instructor"
+  joinedAt   DateTime  @default(now())
+  lastReadAt DateTime?
+
+  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([userId])
+}
+
+model ChatMessage {
+  id       String   @id @default(uuid())
+  roomId   String
+  senderId String
+  content  String
+  sentAt   DateTime @default(now())
+  editedAt DateTime?
+
+  room   ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender User     @relation(fields: [senderId], references: [id])
+
+  @@index([roomId, sentAt])
 }
