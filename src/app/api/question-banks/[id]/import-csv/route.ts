@@ -65,10 +65,12 @@ export const GET = withRole(
     const bank = await prisma.questionBank.findUnique({ where: { id: params!.id } });
     if (!bank) throw new NotFoundError('Ngân hàng câu hỏi');
 
-    return new NextResponse(TEMPLATE_CSV, {
+    // Prepend UTF-8 BOM (\uFEFF) so Excel opens the file in UTF-8 mode
+    // and Vietnamese characters render correctly without garbling.
+    return new NextResponse('\uFEFF' + TEMPLATE_CSV, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="question_bank_template_${params!.id}.csv"`,
+        'Content-Disposition': `attachment; filename="question_bank_template.csv"`,
       },
     });
   },
