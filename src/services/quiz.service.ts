@@ -42,6 +42,101 @@ const DEFAULT_PASSING_SCORE = 70;
 const DEFAULT_TIME_LIMIT_MINS = 30;
 const DEFAULT_MAX_ATTEMPTS = 3;
 
+// ── Category-based competency level mapping ───────────────────
+
+/** Map weighted-correct-percent to a competency level 1–5 (Bloom-style) */
+function mapPercentToLevel(pct: number): number {
+  if (pct >= 80) return 5;
+  if (pct >= 60) return 4;
+  if (pct >= 40) return 3;
+  if (pct >= 20) return 2;
+  return 1;
+}
+
+const DIFFICULTY_WEIGHT: Record<string, number> = {
+  easy: 1,
+  medium: 2,
+  hard: 3,
+};
+
+/**
+ * After any quiz submission (pass or fail), update UserCompetencyProfile
+ * for each QuestionCategory that has a linked competency.
+ *
+ * Scoring: weighted-correct% = Σ(weight × isCorrect) / Σ(weight)
+ * Level mapping: <20%→L1, 20–40%→L2, 40–60%→L3, 60–80%→L4, ≥80%→L5
+ * Rule: never downgrade an existing level.
+ */
+export async function updateCompetencyFromCategories(
+  userId: string,
+  questionIds: string[],
+  gradedAnswers: Record<string, { isCorrect: boolean }>,
+): Promise<void> {
+  if (questionIds.length === 0) return;
+
+  // Fetch questions with categoryId and difficulty
+  const questions = await prisma.question.findMany({
+    where: { id: { in: questionIds } },
+    select: { id: true, categoryId: true, difficulty: true },
+  });
+
+  // Group by categoryId
+  const categoryGroups = new Map<string, { totalWeight: number; correctWeight: number }>();
+  for (const q of questions) {
+    if (!q.categoryId) continue;
+    const graded = gradedAnswers[q.id];
+    if (!graded) continue;
+    const w = DIFFICULTY_WEIGHT[q.difficulty] ?? 1;
+    const entry = categoryGroups.get(q.categoryId) ?? { totalWeight: 0, correctWeight: 0 };
+    entry.totalWeight += w;
+    if (graded.isCorrect) entry.correctWeight += w;
+    categoryGroups.set(q.categoryId, entry);
+  }
+
+  if (categoryGroups.size === 0) return;
+
+  // Fetch categories that have a competency link
+  const categories = await prisma.questionCategory.findMany({
+    where: {
+      id: { in: Array.from(categoryGroups.keys()) },
+      competencyId: { not: null },
+    },
+    select: { id: true, competencyId: true },
+  });
+
+  for (const cat of categories) {
+    if (!cat.competencyId) continue;
+    const grp = categoryGroups.get(cat.id);
+    if (!grp || grp.totalWeight === 0) continue;
+
+    const pct = (grp.correctWeight / grp.totalWeight) * 100;
+    const achievedLevel = mapPercentToLevel(pct);
+
+    const existing = await prisma.userCompetencyProfile.findUnique({
+      where: { userId_competencyId: { userId, competencyId: cat.competencyId } },
+    });
+
+    // Never downgrade
+    if (!existing || existing.currentLevel < achievedLevel) {
+      await prisma.userCompetencyProfile.upsert({
+        where: { userId_competencyId: { userId, competencyId: cat.competencyId } },
+        create: {
+          userId,
+          competencyId: cat.competencyId,
+          currentLevel: achievedLevel,
+          source: 'QUIZ',
+          assessedAt: new Date(),
+        },
+        update: {
+          currentLevel: achievedLevel,
+          source: 'QUIZ',
+          assessedAt: new Date(),
+        },
+      });
+    }
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -113,8 +208,11 @@ export async function startQuiz(
   let allQuestions: { id: string; difficulty: string; type: string; questionText: string; options: unknown; scorePoints: number }[] = [];
 
   if (cfg && cfg.bankIds.length > 0) {
+    const categoryFilter = cfg.filterCategoryIds && cfg.filterCategoryIds.length > 0
+      ? { categoryId: { in: cfg.filterCategoryIds } }
+      : {};
     allQuestions = await prisma.question.findMany({
-      where: { bankId: { in: cfg.bankIds }, status: 'approved' },
+      where: { bankId: { in: cfg.bankIds }, status: 'approved', ...categoryFilter },
       select: {
         id: true, type: true, difficulty: true,
         questionText: true, options: true, scorePoints: true,
@@ -256,6 +354,14 @@ export async function submitQuiz(
     },
   });
 
+  // Category-based competency update — always runs (pass or fail)
+  // Measures per-category weighted score → updates UserCompetencyProfile level
+  await updateCompetencyFromCategories(
+    userId,
+    questionIds,
+    gradedAnswers,
+  ).catch(() => {});
+
   // Update lesson progress if passed
   if (isPassed) {
     await updateLessonProgress(
@@ -265,6 +371,14 @@ export async function submitQuiz(
       companyId,
       { progressPct: 100, status: 'completed' },
     ).catch(() => {}); // Don't fail if progress update fails
+
+    // Course-level competency update (via CompetencyCourseLink)
+    await updateCompetencyFromQuiz(
+      attempt.enrollment.courseId,
+      userId,
+      scorePct,
+      passingScore,
+    ).catch(() => {});
   }
 
   return {
@@ -277,6 +391,64 @@ export async function submitQuiz(
     gradedAnswers,
     submittedAt: updated.submittedAt,
   };
+}
+
+/**
+ * Update UserCompetencyProfile based on quiz score.
+ * Called after a quiz is passed — never downgrades existing level.
+ *
+ * Level assignment by score:
+ *   >= 90% of maxScore → targetLevel + 1 (capped at 5, "exceeds")
+ *   >= 80%             → targetLevel ("meets")
+ *   >= passingScore    → targetLevel - 1 (min 1, "approaching")
+ */
+export async function updateCompetencyFromQuiz(
+  courseId: string,
+  userId: string,
+  scorePct: number,
+  passingScore: number,
+): Promise<void> {
+  // Find competencies linked to this course
+  const links = await prisma.competencyCourseLink.findMany({
+    where: { courseId },
+    select: { competencyId: true, targetLevel: true },
+  });
+
+  if (links.length === 0) return;
+
+  for (const link of links) {
+    let achievedLevel: number;
+    if (scorePct >= 90) {
+      achievedLevel = Math.min(link.targetLevel + 1, 5);
+    } else if (scorePct >= 80) {
+      achievedLevel = link.targetLevel;
+    } else {
+      achievedLevel = Math.max(link.targetLevel - 1, 1);
+    }
+
+    // Upsert — never downgrade existing level
+    const existing = await prisma.userCompetencyProfile.findUnique({
+      where: { userId_competencyId: { userId, competencyId: link.competencyId } },
+    });
+
+    if (!existing || existing.currentLevel < achievedLevel) {
+      await prisma.userCompetencyProfile.upsert({
+        where: { userId_competencyId: { userId, competencyId: link.competencyId } },
+        create: {
+          userId,
+          competencyId: link.competencyId,
+          currentLevel: achievedLevel,
+          source: 'QUIZ',
+          assessedAt: new Date(),
+        },
+        update: {
+          currentLevel: achievedLevel,
+          source: 'QUIZ',
+          assessedAt: new Date(),
+        },
+      });
+    }
+  }
 }
 
 /**

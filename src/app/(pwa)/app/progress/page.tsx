@@ -21,7 +21,7 @@ interface CourseRow {
   estimatedHours: number | null
   isMandatory: boolean
   deadline: string | Date | null
-  source: 'group_publish' | 'learning_group' | 'company_assign'
+  source: 'group_publish' | 'learning_group' | 'company_assign' | 'learning_path'
   ownerCompanyName: string
 }
 
@@ -95,6 +95,7 @@ export default function ProgressPage() {
   const sourceLabel = (src: CourseRow['source']) => {
     if (src === 'group_publish') return 'Tập đoàn'
     if (src === 'learning_group') return 'Nhóm học'
+    if (src === 'learning_path') return 'Lộ trình'
     return 'Công ty'
   }
 
@@ -388,6 +389,7 @@ const SOURCE_STYLE: Record<CourseRow['source'], string> = {
   group_publish:   'bg-primary-tint text-primary',
   learning_group:  'bg-success-tint text-success',
   company_assign:  'bg-warning-tint text-warning',
+  learning_path:   'bg-purple-50 text-purple-600',
 }
 
 function computeStreak(completedDates: string[]): number {

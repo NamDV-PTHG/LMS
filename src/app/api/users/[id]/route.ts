@@ -24,7 +24,7 @@ export const PATCH = withRole(
       }
 
       const isGroupAdmin = user.roles.includes('group_admin');
-      const updated = await updateUser(params!.id, parsed.data, companyId, isGroupAdmin);
+      const updated = await updateUser(params!.id, parsed.data, companyId, isGroupAdmin, user.id);
       return NextResponse.json({ success: true, data: updated });
     } catch (err) {
       return handleApiError(err);

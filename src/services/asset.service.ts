@@ -8,7 +8,7 @@ import {
 } from '@/lib/minio';
 import { assetProcessingQueue } from '@/lib/queue';
 import { CACHE_KEYS, TTL } from '@/lib/cache';
-import { redisGet, redisSet } from '@/lib/redis';
+import { redisGet, redisSet, redisDelPattern } from '@/lib/redis';
 import {
   NotFoundError,
   ForbiddenError,
@@ -108,18 +108,85 @@ export async function confirmUpload(
     },
   });
 
-  // Enqueue processor job
-  await assetProcessingQueue.add('process-asset', {
-    assetId: asset.id,
-    tempObjectName: input.tempObjectName,
-    companyId,
-    orgId: input.organizationId,
-    fileType: input.fileType,
-    mimeType: input.mimeType,
-  });
+  // Enqueue processor job — 3 lần thử, backoff mũ: 15s → 45s → 135s
+  // Priority: số nhỏ hơn = ưu tiên cao hơn. File 1MB → priority 1, file 200MB → priority 200.
+  const priorityBySize = Math.max(1, Math.ceil(input.fileSizeBytes / (1024 * 1024)));
+  await assetProcessingQueue.add(
+    'process-asset',
+    {
+      assetId: asset.id,
+      tempObjectName: input.tempObjectName,
+      companyId,
+      orgId: input.organizationId,
+      fileType: input.fileType,
+      mimeType: input.mimeType,
+    },
+    {
+      priority: priorityBySize,
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 15_000 },
+      removeOnComplete: { count: 200, age: 48 * 60 * 60 },
+      removeOnFail: { count: 100 },
+    },
+  );
+
+  // Create junction record if lessonId provided
+  if (input.lessonId) {
+    await prisma.lessonAsset.upsert({
+      where: { lessonId_assetId: { lessonId: input.lessonId, assetId: asset.id } },
+      create: { lessonId: input.lessonId, assetId: asset.id },
+      update: {},
+    });
+  }
+
+  // Invalidate media library tree cache for this company
+  await redisDelPattern(`mediaLibTree:${companyId}:*`);
 
   // Serialize BigInt → string for JSON response
   return { ...asset, fileSizeBytes: asset.fileSizeBytes.toString() };
+}
+
+/**
+ * Link an existing READY asset to a lesson (creates LessonAsset junction record).
+ * Does NOT modify ContentAsset.lessonId — the file is never "moved".
+ */
+export async function linkAssetToLesson(
+  lessonId: string,
+  assetId: string,
+  companyId: string,
+) {
+  const asset = await prisma.contentAsset.findFirst({
+    where: {
+      id: assetId,
+      isActive: true,
+      processingStatus: 'READY',
+      organization: { OR: [{ companyId }, { id: companyId }] },
+    },
+  });
+  if (!asset) throw new NotFoundError('Tài sản không tồn tại hoặc chưa sẵn sàng');
+
+  const lesson = await prisma.lesson.findUnique({ where: { id: lessonId } });
+  if (!lesson) throw new NotFoundError('Bài học');
+
+  return prisma.lessonAsset.upsert({
+    where: { lessonId_assetId: { lessonId, assetId } },
+    create: { lessonId, assetId },
+    update: {},
+  });
+}
+
+/**
+ * Unlink an asset from a lesson.
+ * Removes the junction record and clears ContentAsset.lessonId if it points here.
+ * NEVER deletes the ContentAsset or the underlying MinIO file.
+ */
+export async function unlinkAssetFromLesson(lessonId: string, assetId: string) {
+  await prisma.lessonAsset.deleteMany({ where: { lessonId, assetId } });
+  // If this asset was "owned" by the lesson (legacy direct FK), just unset the FK
+  await prisma.contentAsset.updateMany({
+    where: { id: assetId, lessonId },
+    data: { lessonId: null },
+  });
 }
 
 /**
@@ -183,31 +250,85 @@ export async function getViewUrl(
 
 /**
  * Handle download request — check policy → return URL or error.
+ * @param bypassPolicy - if true, skip BLOCKED/WATERMARK_ONLY restrictions (for privileged admins)
  */
 export async function handleDownload(
   assetId: string,
   userId: string,
   companyId: string,
+  bypassPolicy: boolean = false,
 ): Promise<{ url?: string; requiresWatermark?: boolean; policy: string }> {
   const asset = await prisma.contentAsset.findUnique({ where: { id: assetId } });
   if (!asset || !asset.isActive) throw new NotFoundError('Asset');
 
   await logAccess(assetId, userId, 'download_attempt');
 
-  if (asset.downloadPolicy === 'BLOCKED') {
+  if (asset.downloadPolicy === 'BLOCKED' && !bypassPolicy) {
     throw new ForbiddenError('Tài liệu này không cho phép tải về');
   }
 
-  if (asset.downloadPolicy === 'WATERMARK_ONLY') {
+  if (asset.downloadPolicy === 'WATERMARK_ONLY' && !bypassPolicy) {
     // Frontend or AI service should apply watermark before download
     await logAccess(assetId, userId, 'download_success');
     return { requiresWatermark: true, policy: 'WATERMARK_ONLY' };
   }
 
-  // ALLOWED
+  // ALLOWED or bypassed
   const url = await getPresignedDownloadUrl(asset.storagePath, 5 * 60); // 5 min
   await logAccess(assetId, userId, 'download_success');
-  return { url, policy: 'ALLOWED' };
+  return { url, policy: bypassPolicy ? 'BYPASSED' : 'ALLOWED' };
+}
+
+/**
+ * Get all assets in an org subtree (recursively) eligible for folder download.
+ * Excludes video files (too large for ZIP), limited to 200 items.
+ */
+export async function getFolderAssetsForDownload(
+  orgId: string,
+  companyId: string,
+): Promise<Array<{ id: string; title: string; storagePath: string; fileType: string; mimeType: string; orgName: string }>> {
+  // Resolve all descendant org IDs via recursive CTE
+  const orgRows = await prisma.$queryRaw<{ id: string; name: string }[]>`
+    WITH RECURSIVE org_tree AS (
+      SELECT id, name FROM "Organization" WHERE id = ${orgId}
+      UNION ALL
+      SELECT o.id, o.name FROM "Organization" o
+      INNER JOIN org_tree ot ON o."parentId" = ot.id
+      WHERE o."isActive" = true
+    )
+    SELECT id, name FROM org_tree
+  `;
+
+  const orgIds = orgRows.map(o => o.id);
+  const orgNameMap = new Map(orgRows.map(o => [o.id, o.name]));
+
+  // Constrain to orgs within this company (tenant safety)
+  const validOrgs = await prisma.organization.findMany({
+    where: { id: { in: orgIds }, OR: [{ companyId }, { id: companyId }] },
+    select: { id: true },
+  });
+  const validOrgIds = validOrgs.map(o => o.id);
+
+  const assets = await prisma.contentAsset.findMany({
+    where: {
+      organizationId: { in: validOrgIds },
+      isActive: true,
+      processingStatus: 'READY',
+      NOT: { fileType: 'video' },
+    },
+    select: { id: true, title: true, storagePath: true, fileType: true, mimeType: true, organizationId: true },
+    take: 200,
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return assets.map(a => ({
+    id: a.id,
+    title: a.title,
+    storagePath: a.storagePath,
+    fileType: a.fileType,
+    mimeType: a.mimeType,
+    orgName: orgNameMap.get(a.organizationId) ?? 'Chung',
+  }));
 }
 
 /**
@@ -229,19 +350,27 @@ async function logAccess(
 
 export async function getAssets(
   companyId: string,
-  filters: { orgId?: string; type?: string; lessonId?: string; page: number; limit: number },
+  filters: { orgId?: string; type?: string; lessonId?: string; status?: string; q?: string; page: number; limit: number },
 ) {
-  const { orgId, type, lessonId, page, limit } = filters;
+  const { orgId, type, lessonId, status, q, page, limit } = filters;
 
-  // Cho phép cả org thuộc company (companyId match) lẫn org là company chính (id match)
-  // Cần thiết cho group_admin: org của họ có companyId=null nhưng org.id === companyId
+  // Build where clause
   const where: Record<string, unknown> = {
     isActive: true,
     organization: { OR: [{ companyId }, { id: companyId }] },
     ...(orgId ? { organizationId: orgId } : {}),
     ...(type ? { fileType: type } : {}),
-    ...(lessonId ? { lessonId } : {}),
+    ...(status ? { processingStatus: status } : {}),
+    ...(q ? { title: { contains: q, mode: 'insensitive' } } : {}),
   };
+
+  // When filtering by lessonId: include assets linked via junction table OR legacy direct FK
+  if (lessonId) {
+    where.OR = [
+      { lessonId },
+      { lessonLinks: { some: { lessonId } } },
+    ];
+  }
 
   const [items, total] = await Promise.all([
     prisma.contentAsset.findMany({

@@ -145,6 +145,7 @@ async function callLlm(
   modelName: string,
   systemPrompt: string,
   userPrompt: string,
+  logCtx?: { userId?: string; companyId?: string; costPerThousandTokens?: number | null },
 ): Promise<RawQuestion[]> {
   const base = endpoint.replace(/\/$/, '');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -152,6 +153,11 @@ async function callLlm(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90_000); // 90s per chunk
+
+  const startMs = Date.now();
+  let logStatus: 'success' | 'error' = 'success';
+  let logError: string | undefined;
+  let usageData: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
 
   try {
     const res = await fetch(`${base}/chat/completions`, {
@@ -171,16 +177,48 @@ async function callLlm(
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      throw new Error(`LLM API lỗi ${res.status}: ${errText.slice(0, 300)}`);
+      logStatus = 'error';
+      logError = `LLM API lỗi ${res.status}: ${errText.slice(0, 300)}`;
+      throw new Error(logError);
     }
 
-    const json = await res.json() as { choices?: { message?: { content?: string } }[] };
+    const json = await res.json() as {
+      choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    };
+    usageData = json.usage;
     const content = json.choices?.[0]?.message?.content;
-    if (!content) throw new Error('LLM trả về phản hồi trống');
+    if (!content) { logStatus = 'error'; logError = 'LLM trả về phản hồi trống'; throw new Error(logError); }
 
     return parseJsonResponse(content);
+  } catch (err) {
+    if (logStatus === 'success') { logStatus = 'error'; logError = err instanceof Error ? err.message : String(err); }
+    throw err;
   } finally {
     clearTimeout(timeout);
+    // Fire-and-forget usage log
+    if (logCtx) {
+      const durationMs = Date.now() - startMs;
+      const totalTokens = usageData?.total_tokens ?? 0;
+      const costUsd = logCtx.costPerThousandTokens && totalTokens > 0
+        ? (totalTokens / 1000) * logCtx.costPerThousandTokens
+        : null;
+      prisma.aiUsageLog.create({
+        data: {
+          userId: logCtx.userId ?? null,
+          companyId: logCtx.companyId ?? null,
+          feature: 'question_generation',
+          modelName,
+          promptTokens: usageData?.prompt_tokens ?? 0,
+          completionTokens: usageData?.completion_tokens ?? 0,
+          totalTokens,
+          costUsd,
+          durationMs,
+          status: logStatus,
+          errorMessage: logError ?? null,
+        },
+      }).catch(() => {});
+    }
   }
 }
 
@@ -195,6 +233,8 @@ export async function processDocumentWithAI(
   questionTypes: string[],
   questionsPerChunk: number,
   difficulty: string,
+  defaultCategoryId?: string | null,
+  companyId?: string | null,
 ): Promise<void> {
   try {
     await prisma.sourceDocument.update({
@@ -254,6 +294,7 @@ export async function processDocumentWithAI(
           aiConfig.modelName,
           systemPrompt,
           userPrompt,
+          { userId: uploadedById, companyId: companyId ?? undefined, costPerThousandTokens: aiConfig.costPerThousandTokens },
         );
 
         for (const q of questions) {
@@ -291,6 +332,7 @@ export async function processDocumentWithAI(
               correctAnswer: correctKey,
               explanation: q.explanation ?? null,
               tags: q.tags ?? [],
+              categoryId: defaultCategoryId ?? null,
               scorePoints: 1,
               status: 'review',
             },

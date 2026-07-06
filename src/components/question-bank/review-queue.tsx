@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 interface Question {
   id: string;
@@ -25,6 +26,8 @@ export function ReviewQueue({ bankId, accessToken, onReviewed }: ReviewQueueProp
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [approveAllDialog, setApproveAllDialog] = useState(false);
+  const [rejectDialog, setRejectDialog] = useState<{ open: boolean; qId: string; comment: string }>({ open: false, qId: '', comment: '' });
 
   const fetchReview = async () => {
     setLoading(true);
@@ -51,7 +54,6 @@ export function ReviewQueue({ bankId, accessToken, onReviewed }: ReviewQueueProp
   };
 
   const handleApproveAll = async () => {
-    if (!confirm(`Duyệt tất cả ${questions.length} câu hỏi?`)) return;
     for (const q of questions) {
       await handleAction(q.id, 'approve');
     }
@@ -69,10 +71,34 @@ export function ReviewQueue({ bankId, accessToken, onReviewed }: ReviewQueueProp
   }
 
   return (
+    <>
+    <ConfirmDialog
+      open={approveAllDialog}
+      title={`Duyệt tất cả ${questions.length} câu hỏi?`}
+      message="Tất cả câu hỏi đang chờ duyệt sẽ được phê duyệt."
+      confirmLabel="Duyệt tất cả"
+      confirmClass="flex-1 px-4 py-2 text-[12px] font-medium rounded-lg text-white transition-colors bg-green-600 hover:bg-green-700"
+      onConfirm={() => { setApproveAllDialog(false); handleApproveAll(); }}
+      onCancel={() => setApproveAllDialog(false)}
+    />
+    <ConfirmDialog
+      open={rejectDialog.open}
+      title="Từ chối câu hỏi"
+      confirmLabel="Từ chối"
+      confirmClass="flex-1 px-4 py-2 text-[12px] font-medium rounded-lg text-white transition-colors disabled:opacity-50 bg-danger hover:bg-danger/90"
+      inputLabel="Lý do từ chối"
+      inputPlaceholder="Nhập lý do từ chối..."
+      inputRequired
+      onConfirm={(comment) => {
+        handleAction(rejectDialog.qId, 'reject', comment);
+        setRejectDialog({ open: false, qId: '', comment: '' });
+      }}
+      onCancel={() => setRejectDialog({ open: false, qId: '', comment: '' })}
+    />
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{questions.length} câu hỏi chờ duyệt</p>
-        <button onClick={handleApproveAll}
+        <button onClick={() => setApproveAllDialog(true)}
           className="text-sm px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700">
           Duyệt tất cả
         </button>
@@ -114,10 +140,7 @@ export function ReviewQueue({ bankId, accessToken, onReviewed }: ReviewQueueProp
               <div className="flex gap-1 flex-shrink-0">
                 <button onClick={() => handleAction(q.id, 'approve')}
                   className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700">Duyệt</button>
-                <button onClick={() => {
-                  const comment = prompt('Lý do từ chối:');
-                  if (comment) handleAction(q.id, 'reject', comment);
-                }}
+                <button onClick={() => setRejectDialog({ open: true, qId: q.id, comment: '' })}
                   className="text-xs px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600">Từ chối</button>
               </div>
             </div>
@@ -125,5 +148,6 @@ export function ReviewQueue({ bankId, accessToken, onReviewed }: ReviewQueueProp
         ))}
       </div>
     </div>
+    </>
   );
 }

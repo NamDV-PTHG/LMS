@@ -7,7 +7,11 @@ import { ValidationError } from '@/lib/errors';
 
 const schema = z.object({
   token: z.string().min(1, 'Token không hợp lệ'),
-  newPassword: z.string().min(8, 'Mật khẩu tối thiểu 8 ký tự'),
+  newPassword: z
+    .string()
+    .min(8, 'Mật khẩu phải có ít nhất 8 ký tự')
+    .regex(/[A-Z]/, 'Mật khẩu phải có ít nhất 1 chữ hoa')
+    .regex(/[0-9]/, 'Mật khẩu phải có ít nhất 1 chữ số'),
 });
 
 export async function POST(req: NextRequest): Promise<NextResponse> {

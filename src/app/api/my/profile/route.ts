@@ -24,11 +24,9 @@ export const GET = withAuth(async (_req, { user, companyId }) => {
         },
       }),
       prisma.enrollment.findMany({
-        where: { userId: user.id, companyId },
+        where: { userId: user.id },
         select: {
           id: true,
-          status: true,
-          progressPercent: true,
           completedAt: true,
           course: { select: { id: true, title: true, thumbnailUrl: true } },
           certificate: {
@@ -44,12 +42,8 @@ export const GET = withAuth(async (_req, { user, companyId }) => {
     }
 
     const totalCourses = enrollments.length
-    const completed = enrollments.filter((e) => e.status === 'completed')
-    const inProgress = enrollments.filter((e) => e.status === 'in_progress')
-    const avgProgress =
-      enrollments.length > 0
-        ? Math.round(enrollments.reduce((sum, e) => sum + (e.progressPercent ?? 0), 0) / enrollments.length)
-        : 0
+    const completed = enrollments.filter((e) => e.completedAt !== null)
+    const inProgress = enrollments.filter((e) => e.completedAt === null)
 
     const certs = completed
       .filter((e) => e.certificate)
@@ -71,15 +65,13 @@ export const GET = withAuth(async (_req, { user, companyId }) => {
           completed: completed.length,
           inProgress: inProgress.length,
           certificates: certs.length,
-          avgProgress,
         },
         certificates: certs,
         recentCourses: enrollments.slice(0, 5).map((e) => ({
           courseId: e.course.id,
           title: e.course.title,
           thumbnailUrl: e.course.thumbnailUrl,
-          status: e.status,
-          progressPercent: e.progressPercent ?? 0,
+          status: e.completedAt ? 'completed' : 'in_progress',
           completedAt: e.completedAt,
         })),
       },

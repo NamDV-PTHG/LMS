@@ -13,6 +13,7 @@ export const GET = withRole(['company_admin', 'hr_manager', 'instructor', 'group
       status: sp.get('status') ?? undefined,
       tag: sp.get('tag') ?? undefined,
       search: sp.get('search') ?? undefined,
+      categoryId: sp.get('categoryId') ?? undefined,
       page: sp.get('page') ? parseInt(sp.get('page')!) : undefined,
       limit: sp.get('limit') ? parseInt(sp.get('limit')!) : undefined,
     });

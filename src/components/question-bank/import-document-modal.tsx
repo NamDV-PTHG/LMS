@@ -2,23 +2,27 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
+interface QuestionCategory { id: string; name: string; color?: string | null }
+
 interface ImportDocumentModalProps {
   bankId: string;
   accessToken: string;
   onClose: () => void;
   onImported: () => void;
+  categories?: QuestionCategory[];
 }
 
 type Stage = 'upload' | 'processing' | 'done' | 'error';
 
 const MAX_POLL_MS = 8 * 60 * 1000; // 8 minutes before declaring timeout
 
-export function ImportDocumentModal({ bankId, accessToken, onClose, onImported }: ImportDocumentModalProps) {
+export function ImportDocumentModal({ bankId, accessToken, onClose, onImported, categories = [] }: ImportDocumentModalProps) {
   const [stage, setStage] = useState<Stage>('upload');
   const [file, setFile] = useState<File | null>(null);
   const [questionTypes, setQuestionTypes] = useState({ mcq: true, true_false: true, fill_blank: false });
   const [difficulty, setDifficulty] = useState('medium');
   const [questionsPerChunk, setQuestionsPerChunk] = useState(3);
+  const [defaultCategoryId, setDefaultCategoryId] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ status: 'pending', questionsGenerated: 0, error: '' });
   const [uploading, setUploading] = useState(false);
@@ -99,6 +103,7 @@ export function ImportDocumentModal({ bankId, accessToken, onClose, onImported }
     formData.append('questionTypes', types);
     formData.append('difficulty', difficulty);
     formData.append('questionsPerChunk', String(questionsPerChunk));
+    if (defaultCategoryId) formData.append('defaultCategoryId', defaultCategoryId);
 
     const res = await fetch(`/api/question-banks/${bankId}/import-document`, {
       method: 'POST',
@@ -184,6 +189,24 @@ export function ImportDocumentModal({ bankId, accessToken, onClose, onImported }
                   onChange={(e) => setQuestionsPerChunk(parseInt(e.target.value) || 3)}
                   className="w-full border rounded px-2 py-1.5 text-sm" />
               </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-600 block mb-1">Danh mục năng lực mặc định</label>
+              {categories.length === 0 ? (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                  Chưa có danh mục nào. Vào tab <strong>Danh mục</strong> để tạo trước khi import.
+                </p>
+              ) : (
+                <select value={defaultCategoryId} onChange={(e) => setDefaultCategoryId(e.target.value)}
+                  className="w-full border rounded px-2 py-1.5 text-sm">
+                  <option value="">-- Không gán danh mục --</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              )}
+              <p className="text-xs text-gray-400 mt-1">Tất cả câu hỏi AI sinh ra sẽ được gán vào danh mục này</p>
             </div>
 
             <div className="flex gap-2 justify-end">

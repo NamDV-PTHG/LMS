@@ -16,6 +16,7 @@ export async function getPositions(
       organization: { select: { id: true, name: true } },
       competencyFramework: { select: { id: true, name: true, version: true } },
       learningPath: { select: { id: true, name: true } },
+      catalog: { select: { id: true, code: true, title: true } },
       _count: { select: { users: true } },
     },
     orderBy: [{ level: 'asc' }, { title: 'asc' }],
@@ -60,6 +61,8 @@ export async function createPosition(
     organizationId?: string;
     competencyFrameworkId?: string;
     learningPathId?: string;
+    catalogId?: string | null;
+    impliedRole?: string | null;
   },
 ) {
   if (data.code) {
@@ -82,6 +85,8 @@ export async function updatePosition(
     organizationId?: string;
     competencyFrameworkId?: string | null;
     learningPathId?: string | null;
+    catalogId?: string | null;
+    impliedRole?: string | null;
     isActive?: boolean;
   },
 ) {

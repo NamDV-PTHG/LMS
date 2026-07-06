@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/components/providers/auth-provider';
 import useSWR from 'swr';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 const fetcher = (url: string, token: string) =>
   fetch(url, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
@@ -49,6 +50,8 @@ export default function FrameworkDetailPage() {
   const [showAddDomain, setShowAddDomain] = useState(false);
   const [addCompForm, setAddCompForm] = useState<Record<string, { name: string; requiredLevel: number; description: string }>>({});
   const [savingDomain, setSavingDomain] = useState(false);
+  const [deleteDomainDialog, setDeleteDomainDialog] = useState<{ open: boolean; domainId: string }>({ open: false, domainId: '' });
+  const [deleteCompDialog, setDeleteCompDialog] = useState<{ open: boolean; compId: string }>({ open: false, compId: '' });
 
   const fw: Framework | undefined = data?.data;
 
@@ -70,7 +73,6 @@ export default function FrameworkDetailPage() {
   };
 
   const handleDeleteDomain = async (domainId: string) => {
-    if (!confirm('Xóa lĩnh vực này? Tất cả năng lực trong lĩnh vực sẽ bị xóa.')) return;
     await fetch(`/api/frameworks/${id}/domains/${domainId}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -93,7 +95,6 @@ export default function FrameworkDetailPage() {
   };
 
   const handleDeleteCompetency = async (compId: string) => {
-    if (!confirm('Xóa năng lực này?')) return;
     await fetch(`/api/competencies/${compId}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -104,6 +105,23 @@ export default function FrameworkDetailPage() {
   if (!fw) return <div className="p-6 text-muted-foreground">Đang tải...</div>;
 
   return (
+    <>
+    <ConfirmDialog
+      open={deleteDomainDialog.open}
+      title="Xóa lĩnh vực này?"
+      message="Tất cả năng lực trong lĩnh vực sẽ bị xóa. Thao tác này không thể hoàn tác."
+      confirmLabel="Xóa"
+      onConfirm={() => { handleDeleteDomain(deleteDomainDialog.domainId); setDeleteDomainDialog({ open: false, domainId: '' }); }}
+      onCancel={() => setDeleteDomainDialog({ open: false, domainId: '' })}
+    />
+    <ConfirmDialog
+      open={deleteCompDialog.open}
+      title="Xóa năng lực này?"
+      message="Thao tác này không thể hoàn tác."
+      confirmLabel="Xóa"
+      onConfirm={() => { handleDeleteCompetency(deleteCompDialog.compId); setDeleteCompDialog({ open: false, compId: '' }); }}
+      onCancel={() => setDeleteCompDialog({ open: false, compId: '' })}
+    />
     <div className="p-6 space-y-6">
       {/* Header */}
       <div>
@@ -152,7 +170,7 @@ export default function FrameworkDetailPage() {
                 <span className="text-xs text-muted-foreground">Trọng số {domain.weight}</span>
               )}
               <span className="text-xs text-muted-foreground">{domain.competencies.length} năng lực</span>
-              <button onClick={(e) => { e.stopPropagation(); handleDeleteDomain(domain.id); }}
+              <button onClick={(e) => { e.stopPropagation(); setDeleteDomainDialog({ open: true, domainId: domain.id }); }}
                 className="text-red-400 hover:text-red-600 text-xs px-1">×</button>
               <span className="text-gray-400">{expandedDomain === domain.id ? '▲' : '▼'}</span>
             </button>
@@ -172,7 +190,7 @@ export default function FrameworkDetailPage() {
                         <p className="text-xs text-muted-foreground mt-0.5">{comp.description}</p>
                       )}
                     </div>
-                    <button onClick={() => handleDeleteCompetency(comp.id)}
+                    <button onClick={() => setDeleteCompDialog({ open: true, compId: comp.id })}
                       className="text-red-400 hover:text-red-600 text-xs">×</button>
                   </div>
                 ))}
@@ -219,5 +237,6 @@ export default function FrameworkDetailPage() {
         )}
       </div>
     </div>
+    </>
   );
 }

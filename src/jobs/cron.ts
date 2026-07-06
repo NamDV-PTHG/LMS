@@ -54,5 +54,26 @@ export function registerCronJobs() {
     }
   });
 
-  console.log('[Cron] Jobs registered (quiz auto-submit every 5min, group sync every hour, path step unlock daily)');
+  // Backup — schedule loaded from DB config (daily 02:00 default)
+  (async () => {
+    try {
+      const backupCfg = await prisma.backupStorageConfig.findUnique({ where: { id: 'singleton' } });
+      if (backupCfg?.isActive) {
+        const { backupQueue } = await import('@/jobs/backup.job');
+        cron.schedule(backupCfg.cronSchedule ?? '0 2 * * *', async () => {
+          try {
+            await backupQueue.add('scheduled-backup', { type: 'FULL', triggeredById: SYSTEM_USER_ID });
+            console.log('[Cron] Scheduled backup job enqueued');
+          } catch (err) {
+            console.error('[Cron] Failed to enqueue backup job:', err);
+          }
+        });
+        console.log(`[Cron] Backup cron registered: ${backupCfg.cronSchedule}`);
+      }
+    } catch (err) {
+      console.error('[Cron] Failed to register backup cron:', err);
+    }
+  })();
+
+  console.log('[Cron] Jobs registered (quiz auto-submit every 5min, group sync every hour, path step unlock daily, backup scheduled)');
 }

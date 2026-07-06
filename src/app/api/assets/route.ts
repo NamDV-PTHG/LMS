@@ -9,10 +9,12 @@ export const GET = withAuth(async (req, { user, companyId }) => {
   const orgId = sp.get('orgId') ?? undefined;
   const type = sp.get('type') ?? undefined;
   const lessonId = sp.get('lessonId') ?? undefined;
+  const status = sp.get('status') ?? undefined;
+  const q = sp.get('q') ?? undefined;
   const page = parseInt(sp.get('page') ?? '1', 10);
   const limit = Math.min(parseInt(sp.get('limit') ?? '20', 10), 100);
 
-  const result = await getAssets(companyId, { orgId, type, lessonId, page, limit });
+  const result = await getAssets(companyId, { orgId, type, lessonId, status, q, page, limit });
   return NextResponse.json({ success: true, data: result.items, meta: result });
 });
 

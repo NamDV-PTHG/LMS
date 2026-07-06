@@ -30,6 +30,8 @@ interface PathEnrollment {
   startedAt: string;
   totalDeadline?: string;
   completedAt?: string;
+  pausedAt?: string;
+  pausedReason?: string;
   learningPath: { id: string; name: string; description?: string };
   stepEnrollments: StepEnrollment[];
 }
@@ -53,38 +55,52 @@ export default function MyLearningPathsPage() {
   const enrollments: PathEnrollment[] = data?.data ?? [];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="max-w-4xl mx-auto space-y-4">
       <div>
-        <h1 className="text-2xl font-bold">Lộ trình học tập của tôi</h1>
-        <p className="text-sm text-muted-foreground mt-1">Các lộ trình học bạn đang tham gia</p>
+        <h1 className="text-[18px] font-medium text-content">Lộ trình học tập của tôi</h1>
+        <p className="text-[12px] text-subtle mt-1">Các lộ trình học bạn đang tham gia</p>
       </div>
 
       {enrollments.length === 0 && !data && (
-        <div className="text-center py-12 text-muted-foreground">Đang tải...</div>
+        <div className="text-center py-12 text-[12px] text-faint">Đang tải...</div>
       )}
       {enrollments.length === 0 && data && (
-        <div className="text-center py-12 text-muted-foreground">Bạn chưa có lộ trình học tập nào.</div>
+        <div className="text-center py-12 text-[12px] text-faint">Bạn chưa có lộ trình học tập nào.</div>
       )}
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         {enrollments.map((pe) => (
-          <div key={pe.id} className="border rounded-xl overflow-hidden">
+          <div key={pe.id} className="bg-surface border border-default rounded-xl shadow-card overflow-hidden">
             {/* Path header */}
             <div
-              className="p-5 cursor-pointer hover:bg-gray-50"
-              onClick={() => setExpandedId(expandedId === pe.id ? null : pe.id)}>
+              className="p-5 cursor-pointer hover:bg-muted transition-colors"
+              onClick={() => setExpandedId(expandedId === pe.id ? null : pe.id)}
+            >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-semibold">{pe.learningPath.name}</h3>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${pe.status === 'COMPLETED' ? 'bg-green-100 text-green-700' : pe.status === 'OVERDUE' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-700'}`}>
-                      {STATUS_LABELS[pe.status]}
+                    <h3 className="text-[13px] font-medium text-content">{pe.learningPath.name}</h3>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                      pe.status === 'COMPLETED'
+                        ? 'bg-success-tint text-success'
+                        : pe.status === 'OVERDUE'
+                        ? 'bg-danger-tint text-danger'
+                        : pe.status === 'PAUSED'
+                        ? 'bg-warning-tint text-warning'
+                        : 'bg-primary-tint text-primary'
+                    }`}>
+                      {STATUS_LABELS[pe.status] ?? pe.status}
                     </span>
+                    {pe.status === 'PAUSED' && pe.pausedReason === 'POSITION_CHANGE' && (
+                      <span className="text-[10px] text-warning/80 bg-warning-tint px-2 py-0.5 rounded-full">
+                        ⏸ Tạm dừng do thay đổi vị trí
+                      </span>
+                    )}
                   </div>
                   {pe.learningPath.description && (
-                    <p className="text-sm text-muted-foreground mt-1">{pe.learningPath.description}</p>
+                    <p className="text-[12px] text-subtle mt-1">{pe.learningPath.description}</p>
                   )}
-                  <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                  <div className="flex gap-4 mt-2 text-[11px] text-faint">
                     <span>Bắt đầu: {new Date(pe.startedAt).toLocaleDateString('vi-VN')}</span>
                     {pe.totalDeadline && (
                       <span>Hạn: {new Date(pe.totalDeadline).toLocaleDateString('vi-VN')}</span>
@@ -95,15 +111,15 @@ export default function MyLearningPathsPage() {
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  <div className="text-2xl font-bold text-blue-600">{Math.round(pe.progressPct)}%</div>
-                  <div className="text-xs text-muted-foreground">Tiến độ</div>
+                  <div className="text-[20px] font-medium text-primary">{Math.round(pe.progressPct)}%</div>
+                  <div className="text-[11px] text-faint">Tiến độ</div>
                 </div>
               </div>
 
               {/* Progress bar */}
-              <div className="mt-3 h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div className="mt-3 h-1.5 bg-muted rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-all ${pe.status === 'COMPLETED' ? 'bg-green-500' : 'bg-blue-500'}`}
+                  className={`h-full rounded-full transition-all ${pe.status === 'COMPLETED' ? 'bg-success' : 'bg-primary'}`}
                   style={{ width: `${pe.progressPct}%` }}
                 />
               </div>
@@ -111,23 +127,35 @@ export default function MyLearningPathsPage() {
 
             {/* Steps expanded */}
             {expandedId === pe.id && (
-              <div className="border-t divide-y">
+              <div className="border-t border-default divide-y divide-default">
                 {pe.stepEnrollments.map((se, idx) => {
                   const locked = !se.isUnlocked;
                   const done = !!se.completedAt;
                   return (
                     <div key={se.id} className={`p-4 flex items-start gap-4 ${locked ? 'opacity-60' : ''}`}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${done ? 'bg-green-100 text-green-700' : locked ? 'bg-gray-100 text-gray-400' : 'bg-blue-100 text-blue-700'}`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-medium shrink-0 ${
+                        done
+                          ? 'bg-success-tint text-success'
+                          : locked
+                          ? 'bg-muted text-faint'
+                          : 'bg-primary-tint text-primary'
+                      }`}>
                         {done ? '✓' : locked ? '🔒' : idx + 1}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm">{se.step.course.title}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${se.step.stepType === 'REQUIRED' ? 'bg-blue-100 text-blue-700' : se.step.stepType === 'ELECTIVE' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>
+                          <span className="font-medium text-[12px] text-content">{se.step.course.title}</span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                            se.step.stepType === 'REQUIRED'
+                              ? 'bg-primary-tint text-primary'
+                              : se.step.stepType === 'ELECTIVE'
+                              ? 'bg-success-tint text-success'
+                              : 'bg-muted text-subtle'
+                          }`}>
                             {se.step.stepType === 'REQUIRED' ? 'Bắt buộc' : se.step.stepType === 'ELECTIVE' ? 'Tự chọn' : 'Nâng cao'}
                           </span>
                         </div>
-                        <div className="flex gap-4 mt-1 text-xs text-muted-foreground">
+                        <div className="flex gap-4 mt-1 text-[11px] text-faint">
                           {se.step.course.estimatedHours && <span>{se.step.course.estimatedHours}h</span>}
                           {se.deadline && <span>Hạn: {new Date(se.deadline).toLocaleDateString('vi-VN')}</span>}
                           {se.courseEnrollment && !done && (
@@ -136,13 +164,15 @@ export default function MyLearningPathsPage() {
                         </div>
                       </div>
                       {!locked && !done && (
-                        <a href={`/courses/${se.step.course.id}`}
-                          className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 shrink-0">
+                        <a
+                          href={`/courses/${se.step.course.id}`}
+                          className="text-[11px] px-3 py-1.5 bg-primary hover:bg-primary-dark text-white rounded-lg shrink-0 transition-colors"
+                        >
                           Học →
                         </a>
                       )}
                       {done && (
-                        <span className="text-xs text-green-600 font-medium shrink-0">Hoàn thành</span>
+                        <span className="text-[11px] text-success font-medium shrink-0">Hoàn thành</span>
                       )}
                     </div>
                   );

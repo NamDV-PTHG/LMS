@@ -155,7 +155,9 @@ export async function enrollUserToPath(
   const lp = await prisma.learningPath.findFirst({ where: { id: pathId, companyId, isActive: true } });
   if (!lp) throw new AppError('LEARNING_PATH_NOT_FOUND', 'Không tìm thấy lộ trình học tập', 404);
 
-  const user = await prisma.user.findFirst({ where: { id: userId, companyId } });
+  const user = await prisma.user.findFirst({
+    where: { id: userId, roles: { some: { organization: { OR: [{ id: companyId }, { companyId }] } } } },
+  });
   if (!user) throw new AppError('USER_NOT_FOUND', 'Không tìm thấy người dùng', 404);
 
   const existing = await prisma.learningPathEnrollment.findUnique({

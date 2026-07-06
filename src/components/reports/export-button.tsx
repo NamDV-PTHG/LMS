@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useToast } from '@/components/ui/toast';
 
 interface ExportButtonProps {
   companyId: string;
@@ -11,6 +12,7 @@ interface ExportButtonProps {
 
 export function ExportButton({ companyId, accessToken, type = 'compliance', label = 'Xuất Excel' }: ExportButtonProps) {
   const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
 
   const handleExport = async () => {
     setLoading(true);
@@ -21,7 +23,7 @@ export function ExportButton({ companyId, accessToken, type = 'compliance', labe
 
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        alert(json.error ?? 'Lỗi xuất báo cáo');
+        toast('error', json.error ?? 'Lỗi xuất báo cáo');
         return;
       }
 

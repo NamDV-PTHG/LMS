@@ -20,6 +20,7 @@ export const createQuestionSchema = z.object({
   explanation: z.string().optional(),
   scorePoints: z.number().int().min(1).default(1),
   tags: z.array(z.string()).default([]),
+  categoryId: z.string().optional().nullable(),
 });
 
 export const updateQuestionSchema = createQuestionSchema.partial().extend({
@@ -70,6 +71,7 @@ export interface QuestionFilter {
   status?: string;
   tag?: string;
   search?: string;
+  categoryId?: string;
   page?: number;
   limit?: number;
 }
@@ -88,6 +90,7 @@ export async function getQuestions(bankId: string, companyId: string, filter: Qu
     ...(filter.status && { status: filter.status }),
     ...(filter.tag && { tags: { has: filter.tag } }),
     ...(filter.search && { questionText: { contains: filter.search, mode: 'insensitive' as const } }),
+    ...(filter.categoryId && { categoryId: filter.categoryId }),
   };
 
   const [questions, total] = await Promise.all([
@@ -99,7 +102,8 @@ export async function getQuestions(bankId: string, companyId: string, filter: Qu
         id: true, type: true, difficulty: true, questionText: true,
         options: true, correctAnswer: true, explanation: true,
         scorePoints: true, tags: true, status: true, reviewComment: true,
-        createdAt: true, sourceDocId: true,
+        createdAt: true, sourceDocId: true, categoryId: true,
+        category: { select: { id: true, name: true, color: true } },
         createdBy: { select: { fullName: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -130,6 +134,7 @@ export async function createQuestion(
       explanation: data.explanation,
       scorePoints: data.scorePoints,
       tags: data.tags,
+      categoryId: data.categoryId ?? null,
       status: 'draft',
     },
   });
@@ -160,6 +165,7 @@ export async function updateQuestion(
       ...(data.tags && { tags: data.tags }),
       ...(data.status && { status: data.status }),
       ...(data.reviewComment !== undefined && { reviewComment: data.reviewComment }),
+      ...('categoryId' in data && { categoryId: data.categoryId ?? null }),
     },
   });
 }
@@ -257,6 +263,7 @@ export async function saveGeneratedQuestions(
     tags: string[];
   }>,
   error?: string,
+  defaultCategoryId?: string | null,
 ) {
   const doc = await prisma.sourceDocument.findUnique({ where: { id: sourceDocId } });
   if (!doc) throw new NotFoundError('SourceDocument');
@@ -302,6 +309,7 @@ export async function saveGeneratedQuestions(
         correctAnswer: correctKey,
         explanation: q.explanation,
         tags: q.tags ?? [],
+        categoryId: defaultCategoryId ?? null,
         scorePoints: 1,
         status: 'review', // AI-generated → needs review before approve
       },

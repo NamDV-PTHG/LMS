@@ -6,6 +6,8 @@ import { CACHE_KEYS, TTL } from '@/lib/cache';
 import { redisSet } from '@/lib/redis';
 import { NotFoundError, ConflictError, ForbiddenError, ValidationError } from '@/lib/errors';
 import { RoleType } from '@/types';
+import { enrollUserToPath } from '@/services/learning-path.service';
+import { invalidateMyCoursesCache } from '@/lib/cache';
 
 // ── Schemas ───────────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ export const updateUserSchema = z.object({
   jobLevel: z.enum(['staff', 'senior', 'manager', 'director', 'c_level']).optional(),
   jobPositionId: z.string().uuid().optional().nullable(),
   isActive: z.boolean().optional(),
+  aiEnabled: z.boolean().optional(),
   avatarUrl: z.string().url().optional().nullable(),
 });
 
@@ -217,8 +220,14 @@ export async function createUser(input: CreateUserInput, companyId: string, isGr
   });
 }
 
-export async function updateUser(id: string, input: UpdateUserInput, companyId: string, isGroupAdmin: boolean) {
-  await getUserById(id, companyId, isGroupAdmin); // throws if not found or not authorized
+export async function updateUser(
+  id: string,
+  input: UpdateUserInput,
+  companyId: string,
+  isGroupAdmin: boolean,
+  updatedById: string,
+) {
+  const currentUser = await getUserById(id, companyId, isGroupAdmin); // throws if not found or not authorized
 
   // Check email uniqueness if changing
   if (input.email) {
@@ -226,14 +235,67 @@ export async function updateUser(id: string, input: UpdateUserInput, companyId: 
     if (existing) throw new ConflictError('Email đã được sử dụng bởi tài khoản khác');
   }
 
-  return prisma.user.update({
+  const positionChanged =
+    input.jobPositionId !== undefined && input.jobPositionId !== currentUser.jobPositionId;
+
+  const updated = await prisma.user.update({
     where: { id },
     data: {
       ...input,
       jobPositionId: input.jobPositionId ?? undefined,
-      // Detect position change via Prisma middleware in jobs (future Sprint 5)
     },
   });
+
+  if (positionChanged) {
+    // Pause all in-progress path enrollments from the old position
+    if (currentUser.jobPositionId) {
+      await prisma.learningPathEnrollment.updateMany({
+        where: { userId: id, status: 'IN_PROGRESS' },
+        data: { status: 'PAUSED', pausedAt: new Date() },
+      });
+    }
+    // Enroll into new position's paths — fire-and-forget
+    if (input.jobPositionId) {
+      enrollUserInPositionPaths(id, input.jobPositionId, companyId, updatedById).catch(() => {});
+    }
+  }
+
+  return updated;
+}
+
+async function enrollUserInPositionPaths(
+  userId: string,
+  positionId: string,
+  companyId: string,
+  enrolledById: string,
+) {
+  const position = await prisma.jobPosition.findUnique({
+    where: { id: positionId },
+    include: {
+      frameworks: {
+        where: { learningPathId: { not: null } },
+        orderBy: { displayOrder: 'asc' },
+      },
+    },
+  });
+  if (!position) return;
+
+  // Prefer per-framework paths; fall back to legacy single learningPathId
+  const pathIds: string[] =
+    position.frameworks.length > 0
+      ? position.frameworks.map((f) => f.learningPathId!).filter(Boolean)
+      : position.learningPathId
+      ? [position.learningPathId]
+      : [];
+
+  for (const pathId of pathIds) {
+    await enrollUserToPath(userId, pathId, companyId, enrolledById, {
+      enrollmentType: 'POSITION_CHANGE',
+    }).catch(() => {}); // silently ignore ALREADY_ENROLLED or path not found
+  }
+
+  // Invalidate cached course list so app reflects new courses immediately
+  await invalidateMyCoursesCache(userId).catch(() => {});
 }
 
 export async function assignRole(userId: string, input: AssignRoleInput, companyId: string, isGroupAdmin: boolean) {

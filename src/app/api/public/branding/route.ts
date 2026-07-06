@@ -36,6 +36,14 @@ export async function GET() {
       loginBgUrl = meta.loginBgUrl;
     }
 
+    // Favicon
+    let faviconUrl: string | null = null;
+    if (meta.faviconObjectName) {
+      faviconUrl = `/api/public/image?key=${encodeURIComponent(meta.faviconObjectName)}`;
+    } else if (meta.faviconUrl) {
+      faviconUrl = meta.faviconUrl;
+    }
+
     return NextResponse.json({
       success: true,
       data: {
@@ -44,6 +52,7 @@ export async function GET() {
         loginBgUrl,
         loginBgColor: meta.loginBgColor ?? null,
         logoUrl,
+        faviconUrl,
         primaryColor: meta.primaryColor ?? '#1a56db',
       },
     });
@@ -57,6 +66,7 @@ export async function GET() {
         loginBgUrl: null,
         loginBgColor: null,
         logoUrl: null,
+        faviconUrl: null,
         primaryColor: '#1a56db',
       },
     });

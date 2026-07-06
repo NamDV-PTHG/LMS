@@ -61,8 +61,14 @@ export default function MyCoursesPage() {
     }
   };
 
-  if (isLoading) return <div className="p-8 text-center text-gray-400">Đang tải...</div>;
-  if (error) return <div className="p-8 text-center text-red-500">{error}</div>;
+  if (isLoading) return (
+    <div className="flex items-center justify-center py-16">
+      <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+  if (error) return (
+    <div className="bg-danger-tint border border-danger/20 rounded-xl p-4 text-[12px] text-danger">{error}</div>
+  );
 
   const enrolled = courses.filter((c) => c.enrollmentId);
   const available = courses.filter((c) => !c.enrollmentId);
@@ -72,20 +78,20 @@ export default function MyCoursesPage() {
     const isDone = !!course.completedAt;
 
     return (
-      <div className="bg-white rounded-xl border hover:shadow-md transition-shadow overflow-hidden flex flex-col">
+      <div className="bg-surface border border-default rounded-xl shadow-card overflow-hidden flex flex-col hover:border-primary/30 transition-colors">
         {/* Thumbnail */}
-        <div className="aspect-video bg-gradient-to-br from-blue-100 to-indigo-100 relative">
+        <div className="aspect-video bg-gradient-to-br from-muted to-primary-tint relative">
           {course.thumbnailUrl ? (
             <img src={course.thumbnailUrl} alt={course.title} className="w-full h-full object-cover" />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
-              <svg className="w-16 h-16 text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+              <svg className="w-14 h-14 text-primary/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
               </svg>
             </div>
           )}
           {isDone && (
-            <div className="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-0.5 rounded-full">
+            <div className="absolute top-2 right-2 bg-success text-white text-[10px] px-2 py-0.5 rounded-full font-medium">
               Hoàn thành
             </div>
           )}
@@ -94,15 +100,15 @@ export default function MyCoursesPage() {
         {/* Content */}
         <div className="p-4 flex-1 flex flex-col gap-3">
           <div>
-            <h3 className="font-semibold text-gray-900 line-clamp-2 text-sm leading-snug">{course.title}</h3>
+            <h3 className="font-medium text-content line-clamp-2 text-[12px] leading-snug">{course.title}</h3>
             {course.description && (
-              <p className="text-xs text-gray-400 mt-1 line-clamp-2">{course.description}</p>
+              <p className="text-[11px] text-faint mt-1 line-clamp-2">{course.description}</p>
             )}
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-gray-400">
+          <div className="flex items-center gap-2 text-[11px] text-faint">
             {course.isMandatory && (
-              <span className="bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded text-[10px] font-medium">Bắt buộc</span>
+              <span className="bg-warning-tint text-warning px-1.5 py-0.5 rounded text-[10px] font-medium">Bắt buộc</span>
             )}
             {course.estimatedHours != null && (
               <span>{course.estimatedHours}h</span>
@@ -112,13 +118,13 @@ export default function MyCoursesPage() {
           {/* Progress bar */}
           {isEnrolled && (
             <div className="space-y-1">
-              <div className="flex justify-between text-xs text-gray-500">
+              <div className="flex justify-between text-[11px] text-subtle">
                 <span>Tiến độ</span>
                 <span>{course.progressPercent ?? 0}%</span>
               </div>
-              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-blue-500 rounded-full transition-all"
+                  className="h-full bg-primary rounded-full transition-all"
                   style={{ width: `${course.progressPercent ?? 0}%` }}
                 />
               </div>
@@ -130,7 +136,7 @@ export default function MyCoursesPage() {
             {isEnrolled ? (
               <Link
                 href={`/my-courses/${course.id}`}
-                className="block w-full text-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                className="block w-full text-center px-4 py-2 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg transition-colors"
               >
                 {isDone ? 'Xem lại' : course.progressPercent > 0 ? 'Tiếp tục học' : 'Bắt đầu học'}
               </Link>
@@ -138,7 +144,7 @@ export default function MyCoursesPage() {
               <button
                 onClick={() => handleEnroll(course.id)}
                 disabled={enrolling === course.id}
-                className="w-full px-4 py-2 border border-blue-600 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
+                className="w-full px-4 py-2 border border-primary text-primary text-[12px] font-medium rounded-lg hover:bg-primary-tint transition-colors disabled:opacity-50"
               >
                 {enrolling === course.id ? 'Đang đăng ký...' : 'Đăng ký khóa học'}
               </button>
@@ -150,19 +156,19 @@ export default function MyCoursesPage() {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-8">
+    <div className="max-w-5xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Khóa học của tôi</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Theo dõi tiến độ học tập</p>
+        <h1 className="text-[18px] font-medium text-content">Khóa học của tôi</h1>
+        <p className="text-[12px] text-subtle mt-0.5">Theo dõi tiến độ học tập</p>
       </div>
 
       {courses.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">Chưa có khóa học nào</div>
+        <div className="text-center py-16 text-[12px] text-faint">Chưa có khóa học nào</div>
       ) : (
         <>
           {enrolled.length > 0 && (
             <section className="space-y-4">
-              <h2 className="text-base font-semibold text-gray-800">Đang học ({enrolled.length})</h2>
+              <h2 className="text-[13px] font-medium text-content">Đang học ({enrolled.length})</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {enrolled.map((c) => <CourseCard key={c.id} course={c} />)}
               </div>
@@ -170,7 +176,7 @@ export default function MyCoursesPage() {
           )}
           {available.length > 0 && (
             <section className="space-y-4">
-              <h2 className="text-base font-semibold text-gray-800">Khóa học khả dụng ({available.length})</h2>
+              <h2 className="text-[13px] font-medium text-content">Khóa học khả dụng ({available.length})</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {available.map((c) => <CourseCard key={c.id} course={c} />)}
               </div>

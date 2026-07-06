@@ -4,8 +4,8 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { Home, BookOpen, TrendingUp, Bell, User } from 'lucide-react'
+import { useAuth } from '@/components/providers/auth-provider'
 
-const LS_READ_KEY = 'pwa-notifs-read-ids'
 const LS_COUNT_KEY = 'pwa-notifs-unread-count'
 
 function readUnreadCount(): number {
@@ -27,9 +27,10 @@ const NAV_ITEMS = [
 
 export default function BottomNav() {
   const pathname = usePathname()
+  const { accessToken } = useAuth()
   const [unreadCount, setUnreadCount] = useState(0)
 
-  // Hydrate unread count from localStorage after mount
+  // Hydrate from localStorage, then poll API every 60s for admin notifications
   useEffect(() => {
     setUnreadCount(readUnreadCount())
 
@@ -37,6 +38,34 @@ export default function BottomNav() {
     window.addEventListener('pwa-notifs-updated', handleUpdate)
     return () => window.removeEventListener('pwa-notifs-updated', handleUpdate)
   }, [])
+
+  useEffect(() => {
+    if (!accessToken) return
+    const fetchApiCount = () => {
+      fetch('/api/notifications?limit=50', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+        .then((r) => r.json())
+        .then((res) => {
+          if (!res.success) return
+          const apiUnread: number = res.meta?.unreadCount ?? 0
+          // Merge with derived unread count stored in localStorage
+          const derivedRaw = parseInt(localStorage.getItem(LS_COUNT_KEY) ?? '0', 10) || 0
+          // If we have an API count, use it directly (notifications page will set full total)
+          // Here just ensure badge shows at least apiUnread
+          const current = readUnreadCount()
+          if (apiUnread > current) {
+            localStorage.setItem(LS_COUNT_KEY, String(apiUnread))
+            setUnreadCount(apiUnread)
+            window.dispatchEvent(new Event('pwa-notifs-updated'))
+          }
+        })
+        .catch(() => {})
+    }
+    fetchApiCount()
+    const timer = setInterval(fetchApiCount, 60_000)
+    return () => clearInterval(timer)
+  }, [accessToken])
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 max-w-phone mx-auto z-50

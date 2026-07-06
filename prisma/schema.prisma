@@ -35,10 +35,14 @@ model Organization {
   users         UserRole[]
   courses       Course[]
   assets        ContentAsset[]
-  positions     JobPosition[]  @relation("CompanyPositions")
-  deptPositions JobPosition[]  @relation("DeptPositions")
-  learningPaths LearningPath[]
-  frameworks    CompetencyFramework[]
+  positions       JobPosition[]     @relation("CompanyPositions")
+  deptPositions   JobPosition[]     @relation("DeptPositions")
+  learningPaths   LearningPath[]
+  frameworks      CompetencyFramework[]
+  jobTitleCatalog     JobTitleCatalog[]
+  jobCategories       CompanyJobCategory[]
+  jobLevels           CompanyJobLevel[]
+  questionCategories  QuestionCategory[]
   policy              CompanyLearningPolicy?
   groupMembers        GroupMember[]
   receivedPublications CoursePublication[] @relation("ReceivedPublications")
@@ -70,6 +74,7 @@ model User {
   isActive             Boolean   @default(true)
   isExternal           Boolean   @default(false)
   mustChangePassword   Boolean   @default(false)
+  aiEnabled            Boolean   @default(false)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -85,11 +90,15 @@ model User {
   positionChangesMade PositionChangeEvent[]   @relation("ChangedBy")
   publishedCourses    CoursePublication[]     @relation("PublishedCourses")
   assignedCourses     CourseAssignment[]      @relation("AssignedCourses")
-  contentRatings      ContentRating[]
-  courseRatings       CourseRating[]
-  passwordResetTokens PasswordResetToken[]
-  chatParticipants    ChatParticipant[]
-  chatMessages        ChatMessage[]
+  contentRatings       ContentRating[]
+  courseRatings        CourseRating[]
+  passwordResetTokens  PasswordResetToken[]
+  chatParticipants     ChatParticipant[]
+  chatMessages         ChatMessage[]
+  createdNotifications Notification[]     @relation("NotificationsCreated")
+  notificationReads    NotificationRead[]
+  aiUsageLogs          AiUsageLog[]
+  backupJobs           BackupJob[]         @relation("BackupJobTriggeredBy")
 }
 
 model UserRole {
@@ -227,6 +236,7 @@ model Lesson {
   dependentLessons   Lesson[]           @relation("LessonPrereq")
   progresses         LessonProgress[]
   assets             ContentAsset[]
+  linkedAssets       LessonAsset[]
   quizConfig         QuizConfig?
   quizAttempts       QuizAttempt[]
 }
@@ -260,12 +270,25 @@ model ContentAsset {
   lesson         Lesson?            @relation(fields: [lessonId], references: [id])
   organization   Organization       @relation(fields: [organizationId], references: [id])
   uploader       User               @relation(fields: [uploadedById], references: [id])
+  lessonLinks    LessonAsset[]
   accessLogs     AssetAccessLog[]
   permissions    AssetPermission[]
   watchEvents    VideoWatchEvent[]
   docEvents      DocumentViewEvent[]
   engagementStat AssetEngagementStat?
   ratings        ContentRating[]
+}
+
+model LessonAsset {
+  id        String       @id @default(uuid())
+  lessonId  String
+  assetId   String
+  lesson    Lesson       @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  asset     ContentAsset @relation(fields: [assetId], references: [id])
+  createdAt DateTime     @default(now())
+
+  @@unique([lessonId, assetId])
+  @@map("lesson_assets")
 }
 
 enum AssetType {
@@ -522,6 +545,55 @@ model CourseRating {
 // COMPETENCY FRAMEWORK & JOB POSITIONS
 // ============================================================
 
+model JobTitleCatalog {
+  id           String   @id @default(uuid())
+  companyId    String
+  code         String
+  title        String
+  level        String?
+  category     String?
+  description  String?
+  isActive     Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company   Organization  @relation(fields: [companyId], references: [id])
+  positions JobPosition[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+}
+
+model CompanyJobCategory {
+  id           String       @id @default(uuid())
+  companyId    String
+  name         String
+  displayOrder Int          @default(0)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+
+  company      Organization @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model CompanyJobLevel {
+  id           String       @id @default(uuid())
+  companyId    String
+  code         String
+  label        String
+  displayOrder Int          @default(0)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+
+  company      Organization @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, code])
+  @@index([companyId])
+}
+
 model JobPosition {
   id                    String   @id @default(uuid())
   companyId             String
@@ -532,6 +604,8 @@ model JobPosition {
   description           String?
   competencyFrameworkId String?
   learningPathId        String?
+  catalogId             String?
+  impliedRole           String?
   isActive              Boolean  @default(true)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -540,6 +614,8 @@ model JobPosition {
   organization        Organization?        @relation("DeptPositions", fields: [organizationId], references: [id])
   competencyFramework CompetencyFramework? @relation(fields: [competencyFrameworkId], references: [id])
   learningPath        LearningPath?        @relation(fields: [learningPathId], references: [id])
+  catalog             JobTitleCatalog?     @relation(fields: [catalogId], references: [id])
+  frameworks          JobPositionFramework[]
   users               User[]
   positionChangesFrom PositionChangeEvent[] @relation("FromPosition")
   positionChangesTo   PositionChangeEvent[] @relation("ToPosition")
@@ -551,6 +627,7 @@ model JobPosition {
 model CompetencyFramework {
   id          String    @id @default(uuid())
   companyId   String
+  code        String?
   name        String
   version     String    @default("1.0")
   description String?
@@ -559,10 +636,12 @@ model CompetencyFramework {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  company   Organization       @relation(fields: [companyId], references: [id])
-  domains   CompetencyDomain[]
-  positions JobPosition[]
+  company            Organization           @relation(fields: [companyId], references: [id])
+  domains            CompetencyDomain[]
+  positions          JobPosition[]
+  positionFrameworks JobPositionFramework[]
 
+  @@unique([companyId, code])
   @@index([companyId])
 }
 
@@ -589,9 +668,10 @@ model Competency {
   levelDescriptions Json
   displayOrder      Int
 
-  domain       CompetencyDomain       @relation(fields: [domainId], references: [id])
-  userProfiles UserCompetencyProfile[]
-  courseLinks  CompetencyCourseLink[]
+  domain             CompetencyDomain       @relation(fields: [domainId], references: [id])
+  userProfiles       UserCompetencyProfile[]
+  courseLinks        CompetencyCourseLink[]
+  questionCategories QuestionCategory[]
 
   @@index([domainId])
 }
@@ -640,6 +720,7 @@ enum AssessmentSource {
 model LearningPath {
   id                String   @id @default(uuid())
   companyId         String
+  code              String?
   name              String
   description       String?
   totalDeadlineDays Int?
@@ -647,11 +728,17 @@ model LearningPath {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  company     Organization             @relation(fields: [companyId], references: [id])
-  steps       LearningPathStep[]
-  positions   JobPosition[]
-  enrollments LearningPathEnrollment[]
+  prerequisitePathId String?
+  prerequisitePath   LearningPath?          @relation("PathPrerequisite", fields: [prerequisitePathId], references: [id])
+  dependentPaths     LearningPath[]         @relation("PathPrerequisite")
 
+  company            Organization             @relation(fields: [companyId], references: [id])
+  steps              LearningPathStep[]
+  positions          JobPosition[]
+  enrollments        LearningPathEnrollment[]
+  positionFrameworks JobPositionFramework[]
+
+  @@unique([companyId, code])
   @@index([companyId])
 }
 
@@ -692,6 +779,8 @@ model LearningPathEnrollment {
   startedAt             DateTime             @default(now())
   totalDeadline         DateTime?
   completedAt           DateTime?
+  pausedAt              DateTime?
+  pausedReason          String?
   progressPct           Float                @default(0)
   approvedById          String?
   approvedAt            DateTime?
@@ -762,6 +851,7 @@ enum PositionChangeStatus {
   PENDING_GAP_ANALYSIS
   GAP_ANALYZED
   PENDING_APPROVAL
+  PENDING_EFFECTIVE
   APPROVED
   ENROLLED
   COMPLETED
@@ -859,12 +949,16 @@ model Question {
   reviewComment String?                         // reject reason
   createdAt     DateTime     @default(now())
 
-  bank      QuestionBank    @relation(fields: [bankId], references: [id])
-  createdBy User            @relation(fields: [createdById], references: [id])
-  sourceDoc SourceDocument? @relation(fields: [sourceDocId], references: [id])
+  categoryId String?
+
+  bank      QuestionBank     @relation(fields: [bankId], references: [id])
+  createdBy User             @relation(fields: [createdById], references: [id])
+  sourceDoc SourceDocument?  @relation(fields: [sourceDocId], references: [id])
+  category  QuestionCategory? @relation(fields: [categoryId], references: [id])
 
   @@index([bankId, status])
   @@index([bankId, difficulty])
+  @@index([categoryId])
 }
 
 // Source documents used for AI question generation
@@ -913,16 +1007,17 @@ enum Difficulty {
 model QuizConfig {
   id               String   @id @default(uuid())
   lessonId         String   @unique
-  bankIds          String[] // IDs of QuestionBank to draw from
-  totalQuestions   Int      @default(10)
-  easyCount        Int      @default(3)
-  mediumCount      Int      @default(5)
-  hardCount        Int      @default(2)
-  passingScore     Float    @default(70)
-  timeLimitMins    Int?     // null = no time limit
-  maxAttempts      Int      @default(3)
-  shuffleQuestions Boolean  @default(true)
-  shuffleOptions   Boolean  @default(true)
+  bankIds             String[] // IDs of QuestionBank to draw from
+  filterCategoryIds   String[] @default([]) // filter by QuestionCategory IDs (empty = no filter)
+  totalQuestions      Int      @default(10)
+  easyCount           Int      @default(3)
+  mediumCount         Int      @default(5)
+  hardCount           Int      @default(2)
+  passingScore        Float    @default(70)
+  timeLimitMins       Int?     // null = no time limit
+  maxAttempts         Int      @default(3)
+  shuffleQuestions    Boolean  @default(true)
+  shuffleOptions      Boolean  @default(true)
 
   lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
 }
@@ -942,6 +1037,45 @@ model QuizAttempt {
   lesson     Lesson     @relation(fields: [lessonId], references: [id])
 
   @@index([enrollmentId, lessonId])
+}
+
+// Question category per-company — phân loại câu hỏi theo nhóm năng lực
+model QuestionCategory {
+  id           String   @id @default(uuid())
+  companyId    String
+  name         String                     // "Năng lực Quản trị", "Năng lực Công nghệ"
+  description  String?
+  color        String?                    // hex "#3B82F6" — dùng cho badge UI
+  competencyId String?                    // optional: link đến Competency để tự động đo lường
+  displayOrder Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  company    Organization      @relation(fields: [companyId], references: [id])
+  competency Competency?       @relation(fields: [competencyId], references: [id])
+  questions  Question[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+// Junction: 1 JobPosition gắn được nhiều CompetencyFramework (mỗi cái có weight + learning path riêng)
+model JobPositionFramework {
+  id             String   @id @default(uuid())
+  positionId     String
+  frameworkId    String
+  learningPathId String?           // tùy chọn: mỗi framework có lộ trình học riêng
+  weight         Float    @default(1.0)    // trọng số khi tính overall readiness
+  isPrimary      Boolean  @default(false)  // framework chính hiển thị mặc định
+  displayOrder   Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  position     JobPosition         @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  framework    CompetencyFramework @relation(fields: [frameworkId], references: [id])
+  learningPath LearningPath?       @relation(fields: [learningPathId], references: [id])
+
+  @@unique([positionId, frameworkId])
+  @@index([positionId])
 }
 
 // ============================================================
@@ -985,16 +1119,38 @@ model CompanyLearningPolicy {
 }
 
 model AiServiceConfig {
-  id                String   @id @default(uuid())
-  companyId         String?  // null = global (group-level)
-  name              String
-  endpoint          String
-  modelName         String
-  apiKey            String?  // API key cho external AI (OpenAI, Gemini v.v.)
-  allowedCompanyIds Json?    // null = tất cả công ty; array UUID = giới hạn công ty được dùng
-  isActive          Boolean  @default(true)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                    String   @id @default(uuid())
+  companyId             String?  // null = global (group-level)
+  name                  String
+  endpoint              String
+  modelName             String
+  apiKey                String?  // API key cho external AI (OpenAI, Gemini v.v.)
+  allowedCompanyIds     Json?    // null = tất cả công ty; array UUID = giới hạn công ty được dùng
+  costPerThousandTokens Float?   // chi phí ước tính mỗi 1000 token (VD: 0.002 cho gpt-4o-mini); null = tự hosted
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model AiUsageLog {
+  id               String   @id @default(uuid())
+  userId           String?  // null = background/system job
+  companyId        String?
+  feature          String   // 'question_generation' | 'chat' | 'document_processing'
+  modelName        String
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  costUsd          Float?   // null nếu tự hosted Ollama
+  durationMs       Int?
+  status           String   @default("success") // 'success' | 'error'
+  errorMessage     String?
+  createdAt        DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([userId, createdAt])
 }
 
 // ============================================================
@@ -1089,4 +1245,109 @@ model ChatMessage {
   sender User     @relation(fields: [senderId], references: [id])
 
   @@index([roomId, sentAt])
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+// targetType: 'all' = toàn công ty, 'dept' = phòng ban, 'user' = cá nhân
+model Notification {
+  id          String   @id @default(uuid())
+  companyId   String?  // null = broadcast toàn tập đoàn (group_admin)
+  targetType  String   @default("all")
+  targetId    String?  // orgId hoặc userId tùy targetType
+  title       String
+  body        String
+  createdById String
+  createdAt   DateTime @default(now())
+
+  createdBy User             @relation("NotificationsCreated", fields: [createdById], references: [id])
+  reads     NotificationRead[]
+
+  @@index([companyId])
+  @@index([createdAt])
+}
+
+model NotificationRead {
+  id             String   @id @default(uuid())
+  notificationId String
+  userId         String
+  readAt         DateTime @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId])
+}
+
+// ============================================================
+// BACKUP
+// ============================================================
+
+model BackupStorageConfig {
+  id             String            @id @default("singleton")
+  destination    BackupDestination @default(LOCAL)
+  isActive       Boolean           @default(false)
+  localPath      String?
+  minioEndpoint  String?
+  minioPort      Int?
+  minioUseSsl    Boolean           @default(false)
+  minioAccessKey String?
+  minioSecretKey String?
+  minioBucket    String?
+  minioRegion    String?
+  gcsProjectId   String?
+  gcsKeyJson     String?
+  gcsBucket      String?
+  gdriveFolderId String?
+  gdriveKeyJson  String?
+  gdriveEmail    String?
+  cronSchedule   String            @default("0 2 * * *")
+  retentionDays  Int               @default(30)
+  updatedAt      DateTime          @updatedAt
+}
+
+model BackupJob {
+  id            String            @id @default(uuid())
+  type          BackupType        @default(FULL)
+  status        BackupStatus      @default(PENDING)
+  triggeredById String
+  scope         String?
+  destination   BackupDestination
+  objectPrefix  String?
+  dbDumpPath    String?
+  sizeBytes     BigInt?
+  fileCount     Int?
+  error         String?
+  restoreNote   String?
+  restoredAt    DateTime?
+  startedAt     DateTime          @default(now())
+  completedAt   DateTime?
+  createdAt     DateTime          @default(now())
+
+  triggeredBy User @relation("BackupJobTriggeredBy", fields: [triggeredById], references: [id])
+}
+
+enum BackupDestination {
+  LOCAL
+  MINIO_REMOTE
+  GCS
+  GOOGLE_DRIVE
+}
+
+enum BackupType {
+  FULL
+  DB_ONLY
+  ASSETS_ONLY
+}
+
+enum BackupStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  RESTORING
+  RESTORED
 }

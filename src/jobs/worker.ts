@@ -5,6 +5,7 @@
 import { startAssetProcessorWorker } from './asset-processor.job';
 import { startTrackingWriterWorker } from './tracking-writer.job';
 import { startPositionChangeWorker } from './position-change.job';
+import { startBackupWorker, startRestoreWorker } from './backup.job';
 import { registerCronJobs } from './cron';
 
 console.log('[Worker] Starting LMS workers...');
@@ -13,6 +14,8 @@ const workers = [
   startAssetProcessorWorker(),
   startTrackingWriterWorker(),
   startPositionChangeWorker(),
+  startBackupWorker(),
+  startRestoreWorker(),
 ];
 
 registerCronJobs();

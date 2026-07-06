@@ -3,11 +3,10 @@ import { withRole } from '@/middleware/require-role';
 import { prisma } from '@/lib/prisma';
 import { handleApiError } from '@/app/api/error-handler';
 import { NotFoundError, ValidationError } from '@/lib/errors';
-import { randomUUID } from 'crypto';
 
 // ── CSV template ───────────────────────────────────────────────
 
-const CSV_HEADER = 'question,type,option_a,option_b,option_c,option_d,correct_answer,difficulty,explanation,points';
+const CSV_HEADER = 'question,type,option_a,option_b,option_c,option_d,correct_answer,difficulty,explanation,points,category';
 
 const CSV_EXAMPLE = `"Trái đất quay quanh mặt trời mất bao nhiêu ngày?",single_choice,"365 ngày","24 giờ","30 ngày","12 tháng",A,easy,"Trái đất mất 365 ngày để hoàn thành một vòng quay quanh Mặt Trời.",1
 "HTML là viết tắt của?",single_choice,"HyperText Markup Language","High Tech Modern Language","HyperText Modern Links","High Text Markup Language",A,medium,,1
@@ -99,6 +98,7 @@ export const POST = withRole(
       const formData = await req.formData();
       const file = formData.get('file') as File | null;
       if (!file) throw new ValidationError('Thiếu file CSV');
+      const defaultCategoryId = (formData.get('defaultCategoryId') as string) || null;
 
       const text = await file.text();
       const rows = parseCSV(text);
@@ -111,14 +111,22 @@ export const POST = withRole(
       const VALID_TYPES = ['single_choice', 'true_false', 'fill_blank'];
       const VALID_DIFF = ['easy', 'medium', 'hard'];
 
+      // Pre-load category map (name → id) for this company
+      const categoryList = await prisma.questionCategory.findMany({
+        where: { companyId, isActive: true },
+        select: { id: true, name: true },
+      });
+      const categoryMap = new Map(categoryList.map((c) => [c.name.toLowerCase(), c.id]));
+
       const questions: Array<{
         questionText: string;
         type: string;
-        options: Array<{ id: string; label: string; content: string }>;
+        options: Array<{ key: string; text: string }>;
         correctAnswer: string;
         difficulty: string;
         explanation: string;
         scorePoints: number;
+        categoryId: string | null;
       }> = [];
 
       const errors: string[] = [];
@@ -127,7 +135,7 @@ export const POST = withRole(
         const row = dataRows[i];
         const rowNum = i + 2;
 
-        const [qText, type, optA, optB, optC, optD, correctRaw, diff, explanation, pointsRaw] = row;
+        const [qText, type, optA, optB, optC, optD, correctRaw, diff, explanation, pointsRaw, categoryName] = row;
 
         if (!qText) { errors.push(`Dòng ${rowNum}: thiếu nội dung câu hỏi`); continue; }
         if (!VALID_TYPES.includes(type)) {
@@ -143,7 +151,7 @@ export const POST = withRole(
 
         const scorePoints = parseInt(pointsRaw ?? '1', 10) || 1;
 
-        let options: Array<{ id: string; label: string; content: string }> = [];
+        let options: Array<{ key: string; text: string }> = [];
         let correctAnswer = '';
 
         if (type === 'single_choice') {
@@ -152,30 +160,28 @@ export const POST = withRole(
           const answerLabel = (correctRaw ?? '').toUpperCase().trim();
 
           options = labels
-            .map((label, idx) => ({ id: randomUUID(), label, content: contents[idx] ?? '' }))
-            .filter((o) => o.content);
+            .map((label, idx) => ({ key: label, text: (contents[idx] ?? '').trim() }))
+            .filter((o) => o.text);
 
           if (options.length < 2) {
             errors.push(`Dòng ${rowNum}: cần ít nhất 2 đáp án cho single_choice`);
             continue;
           }
 
-          const correctOpt = options.find((o) => o.label === answerLabel);
+          const correctOpt = options.find((o) => o.key === answerLabel);
           if (!correctOpt) {
             errors.push(`Dòng ${rowNum}: correct_answer "${correctRaw}" không khớp với nhãn đáp án (A-D)`);
             continue;
           }
-          correctAnswer = correctOpt.id;
+          correctAnswer = correctOpt.key;
 
         } else if (type === 'true_false') {
-          const trueOpt = { id: randomUUID(), label: 'A', content: 'Đúng' };
-          const falseOpt = { id: randomUUID(), label: 'B', content: 'Sai' };
-          options = [trueOpt, falseOpt];
+          options = [{ key: 'A', text: 'Đúng' }, { key: 'B', text: 'Sai' }];
           const raw = (correctRaw ?? '').toLowerCase().trim();
           if (raw === 'a' || raw === 'true' || raw === 'đúng') {
-            correctAnswer = trueOpt.id;
+            correctAnswer = 'A';
           } else if (raw === 'b' || raw === 'false' || raw === 'sai') {
-            correctAnswer = falseOpt.id;
+            correctAnswer = 'B';
           } else {
             errors.push(`Dòng ${rowNum}: correct_answer cho true_false phải là "true/A" hoặc "false/B"`);
             continue;
@@ -190,6 +196,10 @@ export const POST = withRole(
           }
         }
 
+        // Priority: defaultCategoryId from form > category column in CSV > null
+        const categoryId = defaultCategoryId
+          ?? (categoryName?.trim() ? (categoryMap.get(categoryName.trim().toLowerCase()) ?? null) : null);
+
         questions.push({
           questionText: qText,
           type,
@@ -198,6 +208,7 @@ export const POST = withRole(
           difficulty,
           explanation: explanation ?? '',
           scorePoints,
+          categoryId,
         });
       }
 
@@ -223,6 +234,7 @@ export const POST = withRole(
           correctAnswer: q.correctAnswer,
           explanation: q.explanation || null,
           scorePoints: q.scorePoints,
+          categoryId: q.categoryId,
           tags: [],
           status: 'approved',
         })),

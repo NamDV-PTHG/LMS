@@ -6,16 +6,17 @@ import { ValidationError } from '@/lib/errors';
 import { z } from 'zod';
 
 const quizConfigSchema = z.object({
-  bankIds:          z.array(z.string()).min(1),
-  totalQuestions:   z.number().int().min(1),
-  easyCount:        z.number().int().min(0),
-  mediumCount:      z.number().int().min(0),
-  hardCount:        z.number().int().min(0),
-  passingScore:     z.number().min(0).max(100),
-  timeLimitMins:    z.number().int().positive().nullable(),
-  maxAttempts:      z.number().int().min(1),
-  shuffleQuestions: z.boolean(),
-  shuffleOptions:   z.boolean(),
+  bankIds:           z.array(z.string()).min(1),
+  filterCategoryIds: z.array(z.string()).optional().default([]),
+  totalQuestions:    z.number().int().min(1),
+  easyCount:         z.number().int().min(0),
+  mediumCount:       z.number().int().min(0),
+  hardCount:         z.number().int().min(0),
+  passingScore:      z.number().min(0).max(100),
+  timeLimitMins:     z.number().int().positive().nullable(),
+  maxAttempts:       z.number().int().min(1),
+  shuffleQuestions:  z.boolean(),
+  shuffleOptions:    z.boolean(),
 });
 
 // GET /api/lessons/:lessonId/quiz-config

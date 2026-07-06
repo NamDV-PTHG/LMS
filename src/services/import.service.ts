@@ -13,6 +13,13 @@ export interface ImportError {
   message: string;
 }
 
+export interface ImportWarning {
+  row: number;
+  column: string;
+  value: unknown;
+  message: string;
+}
+
 export interface ImportResult {
   jobId: string;
   status: 'SUCCESS' | 'FAILED';
@@ -20,6 +27,7 @@ export interface ImportResult {
   successRows: number;
   errorRows: number;
   errors: ImportError[];
+  warnings?: ImportWarning[];
 }
 
 interface OrgRow {
@@ -28,16 +36,30 @@ interface OrgRow {
   type: string;
   parentCode: string;
   description?: string;
+  displayOrder?: number;
 }
 
 interface UserRow {
-  employeeCode: string;
+  employeeCode?: string;
   fullName: string;
   email: string;
-  orgCode: string;
+  orgCode?: string;
   role: string;
+  positionCode?: string;
   jobTitle?: string;
   jobLevel?: string;
+  password?: string;
+}
+
+interface JobPositionRow {
+  code: string;
+  title: string;
+  level?: string;
+  catalogCode?: string;
+  orgCode?: string;
+  competencyFrameworkCode?: string;
+  learningPathCode?: string;
+  description?: string;
 }
 
 // ── Excel helpers ─────────────────────────────────────────────
@@ -51,7 +73,6 @@ export function parseExcel(buffer: Buffer, sheetName: string): Record<string, un
 
 /**
  * Topological sort for org rows: parents before children.
- * Handles depth-first traversal via code→parentCode references.
  */
 export function topologicalSort(rows: OrgRow[]): OrgRow[] {
   const codeMap = new Map(rows.map((r) => [r.code, r]));
@@ -79,11 +100,11 @@ export function validateOrgRows(rows: OrgRow[]): ImportError[] {
   const codes = new Set<string>();
 
   rows.forEach((row, i) => {
-    const rowNum = i + 2; // Excel row (1-indexed header)
+    const rowNum = i + 2;
     if (!row.code) errors.push({ row: rowNum, column: 'code', value: row.code, message: 'Mã không được trống' });
     if (!row.name) errors.push({ row: rowNum, column: 'name', value: row.name, message: 'Tên không được trống' });
     if (!['group', 'company', 'dept', 'team'].includes(row.type)) {
-      errors.push({ row: rowNum, column: 'type', value: row.type, message: 'Loại phải là: group/company/dept/team' });
+      errors.push({ row: rowNum, column: 'type', value: row.type, message: 'Loại phải là: dept/team' });
     }
     if (codes.has(row.code)) {
       errors.push({ row: rowNum, column: 'code', value: row.code, message: `Mã "${row.code}" bị trùng` });
@@ -147,19 +168,10 @@ export async function importOrgChart(
       where: { id: jobRecord.id },
       data: { status: 'FAILED', errorRows: errors.length, errorLog: errors as unknown as object },
     });
-    return {
-      jobId: jobRecord.id,
-      status: 'FAILED',
-      totalRows: rawRows.length,
-      successRows: 0,
-      errorRows: errors.length,
-      errors,
-    };
+    return { jobId: jobRecord.id, status: 'FAILED', totalRows: rawRows.length, successRows: 0, errorRows: errors.length, errors };
   }
 
   const sorted = topologicalSort(rawRows);
-
-  // Snapshot existing orgs for rollback
   const snapshot = await prisma.organization.findMany({ where: { companyId } });
 
   await prisma.$transaction(async (tx) => {
@@ -185,22 +197,105 @@ export async function importOrgChart(
 
   await prisma.importJob.update({
     where: { id: jobRecord.id },
+    data: { status: 'SUCCESS', successRows: sorted.length, completedAt: new Date(), snapshot: snapshot as unknown as object },
+  });
+
+  return { jobId: jobRecord.id, status: 'SUCCESS', totalRows: rawRows.length, successRows: sorted.length, errorRows: 0, errors: [] };
+}
+
+// ── Import: Job Positions ─────────────────────────────────────
+
+export async function importJobPositions(
+  buffer: Buffer,
+  companyId: string,
+  createdById: string,
+): Promise<ImportResult> {
+  const rawRows = parseExcel(buffer, 'JobPositions') as JobPositionRow[];
+
+  const jobRecord = await prisma.importJob.create({
+    data: { companyId, importType: 'job_positions', fileName: 'import.xlsx', totalRows: rawRows.length, createdById },
+  });
+
+  // Pre-fetch reference data maps for this company
+  const [catalogMap, frameworkMap, pathMap] = await Promise.all([
+    prisma.jobTitleCatalog.findMany({ where: { companyId }, select: { code: true, id: true } })
+      .then((rows) => new Map(rows.map((r) => [r.code, r.id]))),
+    prisma.competencyFramework.findMany({ where: { companyId }, select: { code: true, id: true } })
+      .then((rows) => new Map(rows.filter((r) => r.code).map((r) => [r.code!, r.id]))),
+    prisma.learningPath.findMany({ where: { companyId }, select: { code: true, id: true } })
+      .then((rows) => new Map(rows.filter((r) => r.code).map((r) => [r.code!, r.id]))),
+  ]);
+
+  let successRows = 0;
+  const warnings: ImportWarning[] = [];
+
+  await prisma.$transaction(async (tx) => {
+    for (let i = 0; i < rawRows.length; i++) {
+      const row = rawRows[i];
+      const rowNum = i + 2;
+      if (!row.code || !row.title) continue;
+
+      const org = row.orgCode
+        ? await tx.organization.findFirst({ where: { code: row.orgCode, companyId } })
+        : null;
+
+      if (row.orgCode && !org) {
+        warnings.push({ row: rowNum, column: 'orgCode', value: row.orgCode, message: `Không tìm thấy phòng ban "${row.orgCode}" — vị trí sẽ không gắn phòng ban` });
+      }
+
+      const catalogId = row.catalogCode ? catalogMap.get(row.catalogCode) : undefined;
+      if (row.catalogCode && !catalogId) {
+        warnings.push({ row: rowNum, column: 'catalogCode', value: row.catalogCode, message: `Mã chức danh "${row.catalogCode}" không có trong danh mục` });
+      }
+
+      const frameworkId = row.competencyFrameworkCode ? frameworkMap.get(row.competencyFrameworkCode) : undefined;
+      if (row.competencyFrameworkCode && !frameworkId) {
+        warnings.push({ row: rowNum, column: 'competencyFrameworkCode', value: row.competencyFrameworkCode, message: `Mã framework "${row.competencyFrameworkCode}" không tìm thấy` });
+      }
+
+      const learningPathId = row.learningPathCode ? pathMap.get(row.learningPathCode) : undefined;
+      if (row.learningPathCode && !learningPathId) {
+        warnings.push({ row: rowNum, column: 'learningPathCode', value: row.learningPathCode, message: `Mã lộ trình "${row.learningPathCode}" không tìm thấy` });
+      }
+
+      await tx.jobPosition.upsert({
+        where: { companyId_code: { companyId, code: row.code } },
+        update: {
+          title: row.title,
+          level: row.level || undefined,
+          description: row.description || undefined,
+          organizationId: org?.id,
+          catalogId: catalogId ?? undefined,
+          competencyFrameworkId: frameworkId ?? undefined,
+          learningPathId: learningPathId ?? undefined,
+        },
+        create: {
+          companyId,
+          code: row.code,
+          title: row.title,
+          level: row.level || undefined,
+          description: row.description || undefined,
+          organizationId: org?.id,
+          catalogId: catalogId ?? undefined,
+          competencyFrameworkId: frameworkId ?? undefined,
+          learningPathId: learningPathId ?? undefined,
+        },
+      });
+      successRows++;
+    }
+  });
+
+  await prisma.importJob.update({
+    where: { id: jobRecord.id },
     data: {
       status: 'SUCCESS',
-      successRows: sorted.length,
+      successRows,
       completedAt: new Date(),
-      snapshot: snapshot as unknown as object,
+      errorLog: warnings.length > 0 ? (warnings as unknown as object) : undefined,
     },
   });
 
-  return {
-    jobId: jobRecord.id,
-    status: 'SUCCESS',
-    totalRows: rawRows.length,
-    successRows: sorted.length,
-    errorRows: 0,
-    errors: [],
-  };
+  return { jobId: jobRecord.id, status: 'SUCCESS', totalRows: rawRows.length, successRows, errorRows: 0, errors: [], warnings };
 }
 
 // ── Import: Users ─────────────────────────────────────────────
@@ -214,13 +309,7 @@ export async function importUsers(
   const errors = validateUserRows(rawRows);
 
   const jobRecord = await prisma.importJob.create({
-    data: {
-      companyId,
-      importType: 'users',
-      fileName: 'import.xlsx',
-      totalRows: rawRows.length,
-      createdById,
-    },
+    data: { companyId, importType: 'users', fileName: 'import.xlsx', totalRows: rawRows.length, createdById },
   });
 
   if (errors.length > 0) {
@@ -232,103 +321,161 @@ export async function importUsers(
   }
 
   let successRows = 0;
-  const defaultPassword = await bcrypt.hash('ChangeMe@123', 10);
+  const warnings: ImportWarning[] = [];
+  const defaultHashedPwd = await bcrypt.hash('ChangeMe@123', 10);
 
-  await prisma.$transaction(async (tx) => {
-    for (const row of rawRows) {
-      // Find org by code
-      const org = await tx.organization.findFirst({ where: { code: row.orgCode, companyId } });
-      if (!org) continue;
-
-      const user = await tx.user.upsert({
-        where: { email: row.email.toLowerCase() },
-        update: { fullName: row.fullName, jobTitle: row.jobTitle, jobLevel: row.jobLevel },
-        create: {
-          email: row.email.toLowerCase(),
-          fullName: row.fullName,
-          employeeCode: row.employeeCode || undefined,
-          jobTitle: row.jobTitle,
-          jobLevel: row.jobLevel,
-          passwordHash: defaultPassword,
+  // Pre-build position map for this company
+  const positionMap = await prisma.jobPosition.findMany({
+    where: { companyId },
+    select: {
+      id: true, code: true,
+      competencyFrameworkId: true,
+      learningPathId: true,
+      competencyFramework: {
+        include: {
+          domains: { include: { competencies: { select: { id: true } } } },
         },
-      });
+      },
+    },
+  }).then((rows) => new Map(rows.filter((r) => r.code).map((r) => [r.code!, r])));
 
-      await tx.userRole.upsert({
-        where: {
-          userId_role_organizationId: {
-            userId: user.id,
-            role: row.role as RoleType,
-            organizationId: org.id,
-          },
-        },
+  for (let i = 0; i < rawRows.length; i++) {
+    const row = rawRows[i];
+    const rowNum = i + 2;
+
+    // Find org
+    const org = row.orgCode
+      ? await prisma.organization.findFirst({ where: { code: row.orgCode, companyId } })
+      : null;
+
+    if (row.orgCode && !org) {
+      warnings.push({ row: rowNum, column: 'orgCode', value: row.orgCode, message: `Phòng ban "${row.orgCode}" không tìm thấy` });
+    }
+
+    // Find position
+    const position = row.positionCode ? positionMap.get(row.positionCode) : undefined;
+    if (row.positionCode && !position) {
+      warnings.push({ row: rowNum, column: 'positionCode', value: row.positionCode, message: `Vị trí "${row.positionCode}" không tìm thấy` });
+    }
+
+    // Determine password
+    const passwordHash = row.password && row.password.length >= 8
+      ? await bcrypt.hash(row.password, 10)
+      : defaultHashedPwd;
+
+    // Upsert user (User model has no companyId — association is via UserRole)
+    const user = await prisma.user.upsert({
+      where: { email: row.email.toLowerCase() },
+      update: {
+        fullName: row.fullName,
+        jobTitle: row.jobTitle || undefined,
+        jobLevel: row.jobLevel || undefined,
+        jobPositionId: position?.id ?? undefined,
+      },
+      create: {
+        email: row.email.toLowerCase(),
+        fullName: row.fullName,
+        employeeCode: row.employeeCode || undefined,
+        jobTitle: row.jobTitle || undefined,
+        jobLevel: row.jobLevel || undefined,
+        passwordHash,
+        jobPositionId: position?.id ?? undefined,
+      },
+    });
+
+    // Assign role in org
+    if (org) {
+      await prisma.userRole.upsert({
+        where: { userId_role_organizationId: { userId: user.id, role: row.role as RoleType, organizationId: org.id } },
         update: {},
-        create: {
-          userId: user.id,
-          role: row.role as RoleType,
-          organizationId: org.id,
-          assignedBy: createdById,
-        },
+        create: { userId: user.id, role: row.role as RoleType, organizationId: org.id, assignedBy: createdById },
       });
-      successRows++;
     }
-  });
+
+    // Auto-init UserCompetencyProfile (level=0) for all competencies in position's framework
+    if (position?.competencyFramework) {
+      const allCompetencies = position.competencyFramework.domains.flatMap((d) => d.competencies);
+      for (const comp of allCompetencies) {
+        await prisma.userCompetencyProfile.upsert({
+          where: { userId_competencyId: { userId: user.id, competencyId: comp.id } },
+          update: {}, // Don't overwrite existing assessments
+          create: { userId: user.id, competencyId: comp.id, currentLevel: 0, source: 'SYSTEM' },
+        });
+      }
+    }
+
+    // Auto-enroll user into position's learning path (if any and not already enrolled)
+    if (position?.learningPathId) {
+      const existingEnrollment = await prisma.learningPathEnrollment.findFirst({
+        where: { userId: user.id, learningPathId: position.learningPathId },
+      });
+
+      if (!existingEnrollment) {
+        // Fetch path steps
+        const pathSteps = await prisma.learningPathStep.findMany({
+          where: { learningPathId: position.learningPathId },
+          orderBy: { stepOrder: 'asc' },
+        });
+
+        const pathEnrollment = await prisma.learningPathEnrollment.create({
+          data: {
+            userId: user.id,
+            learningPathId: position.learningPathId,
+            status: 'IN_PROGRESS',
+            startedAt: new Date(),
+          },
+        });
+
+        // Create step enrollments — smart skip if user already completed the course
+        const completedCourseIds = new Set(
+          (await prisma.enrollment.findMany({
+            where: { userId: user.id, completedAt: { not: null } },
+            select: { courseId: true },
+          })).map((e) => e.courseId),
+        );
+
+        let completedCount = 0;
+        for (let s = 0; s < pathSteps.length; s++) {
+          const step = pathSteps[s];
+          const isCompleted = completedCourseIds.has(step.courseId);
+          const isUnlocked = s === 0 || isCompleted;
+
+          await prisma.learningPathStepEnrollment.create({
+            data: {
+              learningPathEnrollmentId: pathEnrollment.id,
+              learningPathStepId: step.id,
+              status: isCompleted ? 'completed' : 'not_started',
+              isUnlocked,
+              completedAt: isCompleted ? new Date() : null,
+            },
+          });
+          if (isCompleted) completedCount++;
+        }
+
+        const progressPct = pathSteps.length > 0 ? Math.round((completedCount / pathSteps.length) * 100) : 0;
+        if (progressPct > 0) {
+          await prisma.learningPathEnrollment.update({
+            where: { id: pathEnrollment.id },
+            data: { progressPct },
+          });
+        }
+      }
+    }
+
+    successRows++;
+  }
 
   await prisma.importJob.update({
     where: { id: jobRecord.id },
-    data: { status: 'SUCCESS', successRows, completedAt: new Date() },
+    data: {
+      status: 'SUCCESS',
+      successRows,
+      completedAt: new Date(),
+      errorLog: warnings.length > 0 ? (warnings as unknown as object) : undefined,
+    },
   });
 
-  return { jobId: jobRecord.id, status: 'SUCCESS', totalRows: rawRows.length, successRows, errorRows: 0, errors: [] };
-}
-
-// ── Import: Job Positions ────────────────────────────────────
-
-export async function importJobPositions(
-  buffer: Buffer,
-  companyId: string,
-  createdById: string,
-): Promise<ImportResult> {
-  const rawRows = parseExcel(buffer, 'JobPositions') as {
-    code: string;
-    title: string;
-    level?: string;
-    orgCode?: string;
-    description?: string;
-  }[];
-
-  const jobRecord = await prisma.importJob.create({
-    data: { companyId, importType: 'job_positions', fileName: 'import.xlsx', totalRows: rawRows.length, createdById },
-  });
-
-  let successRows = 0;
-  await prisma.$transaction(async (tx) => {
-    for (const row of rawRows) {
-      const org = row.orgCode
-        ? await tx.organization.findFirst({ where: { code: row.orgCode, companyId } })
-        : null;
-
-      await tx.jobPosition.upsert({
-        where: { companyId_code: { companyId, code: row.code } },
-        update: { title: row.title, level: row.level, description: row.description },
-        create: {
-          companyId,
-          organizationId: org?.id,
-          code: row.code,
-          title: row.title,
-          level: row.level,
-          description: row.description,
-        },
-      });
-      successRows++;
-    }
-  });
-
-  await prisma.importJob.update({
-    where: { id: jobRecord.id },
-    data: { status: 'SUCCESS', successRows, completedAt: new Date() },
-  });
-
-  return { jobId: jobRecord.id, status: 'SUCCESS', totalRows: rawRows.length, successRows, errorRows: 0, errors: [] };
+  return { jobId: jobRecord.id, status: 'SUCCESS', totalRows: rawRows.length, successRows, errorRows: 0, errors: [], warnings };
 }
 
 // ── Rollback ──────────────────────────────────────────────────
@@ -339,20 +486,10 @@ export async function rollbackImport(jobId: string, companyId: string): Promise<
   if (job.companyId !== companyId) throw new ValidationError('Không có quyền rollback job này');
   if (job.status !== 'SUCCESS') throw new ValidationError('Chỉ có thể rollback job đã SUCCESS');
 
-  const createdAt = job.createdAt;
-  const hoursSince = (Date.now() - createdAt.getTime()) / 3600000;
+  const hoursSince = (Date.now() - job.createdAt.getTime()) / 3600000;
   if (hoursSince > 24) throw new ValidationError('Chỉ có thể rollback trong vòng 24h');
 
-  // For org_chart: restore snapshot
-  if (job.importType === 'org_chart' && job.snapshot) {
-    // TODO: clarify with team — full restore strategy for nested orgs
-    // Current: mark job as ROLLED_BACK
-  }
-
-  await prisma.importJob.update({
-    where: { id: jobId },
-    data: { status: 'ROLLED_BACK' },
-  });
+  await prisma.importJob.update({ where: { id: jobId }, data: { status: 'ROLLED_BACK' } });
 }
 
 // ── Error file generation ─────────────────────────────────────
@@ -366,7 +503,6 @@ export function generateErrorFile(
   const ws = wb.Sheets[sheetName];
   if (!ws) return originalBuffer;
 
-  // Add a red highlight style to error cells (basic — XLSX open source has limited styling)
   errors.forEach((err) => {
     const cellAddr = XLSX.utils.encode_cell({ r: err.row - 1, c: 0 });
     if (ws[cellAddr]) {

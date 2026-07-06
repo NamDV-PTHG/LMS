@@ -15,7 +15,7 @@ interface CourseRow {
   completionMode: string;
   ownerCompanyId: string;
   ownerCompanyName: string;
-  source: 'group_publish' | 'learning_group' | 'company_assign';
+  source: 'group_publish' | 'learning_group' | 'company_assign' | 'learning_path';
   deadline: Date | null;
   isMandatory: boolean;
   enrollmentId: string | null;
@@ -95,7 +95,27 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
         AND c."isActive" = true
     ),
 
-    -- Union và deduplicate (ưu tiên theo thứ tự: group_publish > learning_group > company_assign)
+    -- ④ learning_path: Khóa học từ bước đã unlock trong lộ trình học tập
+    source4 AS (
+      SELECT
+        c.id, c.title, c.description, c."thumbnailUrl", c."estimatedHours",
+        c."completionMode", c."ownerCompanyId", org.name AS "ownerCompanyName",
+        'learning_path'::text AS source,
+        lpse.deadline,
+        (lps."stepType" = 'REQUIRED')::boolean AS "isMandatory"
+      FROM "LearningPathEnrollment" lpe
+      JOIN "LearningPathStepEnrollment" lpse ON lpse."learningPathEnrollmentId" = lpe.id
+        AND lpse."isUnlocked" = true
+      JOIN "LearningPathStep" lps ON lps.id = lpse."learningPathStepId"
+      JOIN "Course" c ON c.id = lps."courseId"
+      JOIN "Organization" org ON org.id = c."ownerCompanyId"
+      WHERE lpe."userId" = ${userId}
+        AND lpe.status IN ('IN_PROGRESS', 'COMPLETED')
+        AND c."isPublished" = true
+        AND c."isActive" = true
+    ),
+
+    -- Union và deduplicate (ưu tiên: group_publish > learning_group > company_assign > learning_path)
     all_courses AS (
       SELECT *, ROW_NUMBER() OVER (
         PARTITION BY id
@@ -103,6 +123,7 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
           WHEN 'group_publish'   THEN 1
           WHEN 'learning_group'  THEN 2
           WHEN 'company_assign'  THEN 3
+          WHEN 'learning_path'   THEN 4
         END
       ) AS rn
       FROM (
@@ -111,6 +132,8 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
         SELECT * FROM source2
         UNION ALL
         SELECT * FROM source3
+        UNION ALL
+        SELECT * FROM source4
       ) combined
     )
 
@@ -120,18 +143,28 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
       ac.source, ac.deadline, ac."isMandatory",
       e.id AS "enrollmentId",
       e."completedAt",
-      -- Tính tiến độ dựa trên TẤT CẢ bài học trong khóa học (kể cả chưa học = 0%)
-      -- AVG chỉ tính trung bình các bài ĐÃ có record → sai khi chỉ học 1/10 bài
-      (
-        SELECT CASE WHEN COUNT(l.id) = 0 THEN 0
-               ELSE COALESCE(SUM(lp2."progressPct"), 0)::float / COUNT(l.id)
-               END
-        FROM "CourseSection" s
-        JOIN "Lesson" l ON l."sectionId" = s.id
-        LEFT JOIN "LessonProgress" lp2
-          ON lp2."lessonId" = l.id AND lp2."enrollmentId" = e.id
-        WHERE s."courseId" = ac.id
-      ) AS "progressPercent"
+      -- Tính tiến độ:
+      --   • Nếu enrollment đã hoàn thành (completedAt IS NOT NULL) → luôn trả 100
+      --   • Ngược lại: tính theo bài học bắt buộc (isRequired = true) để đồng nhất
+      --     với logic checkCourseCompletion; nếu không có bài bắt buộc thì dùng tất cả bài
+      CASE
+        WHEN e."completedAt" IS NOT NULL THEN 100::float
+        ELSE (
+          SELECT CASE
+            WHEN COUNT(l.id) FILTER (WHERE l."isRequired" = true) > 0 THEN
+              COALESCE(SUM(lp2."progressPct") FILTER (WHERE l."isRequired" = true), 0)::float
+              / COUNT(l.id) FILTER (WHERE l."isRequired" = true)
+            WHEN COUNT(l.id) > 0 THEN
+              COALESCE(SUM(lp2."progressPct"), 0)::float / COUNT(l.id)
+            ELSE 0
+          END
+          FROM "CourseSection" s
+          JOIN "Lesson" l ON l."sectionId" = s.id
+          LEFT JOIN "LessonProgress" lp2
+            ON lp2."lessonId" = l.id AND lp2."enrollmentId" = e.id
+          WHERE s."courseId" = ac.id
+        )
+      END AS "progressPercent"
     FROM all_courses ac
     LEFT JOIN "Enrollment" e ON e."courseId" = ac.id AND e."userId" = ${userId}
     WHERE ac.rn = 1

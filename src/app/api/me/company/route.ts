@@ -43,6 +43,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         loginBgUrl: meta.loginBgObjectName
           ? `/api/public/image?key=${encodeURIComponent(meta.loginBgObjectName)}`
           : (meta.loginBgUrl ?? null),
+        siteTitle: meta.siteTitle ?? null,
+        siteDescription: meta.siteDescription ?? null,
       },
     });
   } catch (err) {

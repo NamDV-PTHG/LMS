@@ -4,6 +4,7 @@ import { useAuth } from '@/components/providers/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { Plus, X, Building2 } from 'lucide-react';
 
 interface Organization {
   id: string;
@@ -24,6 +25,9 @@ const ORG_TYPE_LABEL: Record<string, string> = {
   team: 'Nhóm',
 };
 
+const inputClass =
+  'w-full border border-default rounded-lg px-3 py-2 text-[12px] text-content placeholder:text-faint focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors';
+
 export default function OrganizationsPage() {
   const { accessToken, user } = useAuth();
   const { toast } = useToast();
@@ -32,7 +36,6 @@ export default function OrganizationsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Create modal
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({
     name: '',
@@ -46,7 +49,6 @@ export default function OrganizationsPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Step 2: create company admin (shown after company is created)
   const [createdOrgId, setCreatedOrgId] = useState<string | null>(null);
   const [createdOrgName, setCreatedOrgName] = useState('');
   const [showAdminStep, setShowAdminStep] = useState(false);
@@ -102,7 +104,6 @@ export default function OrganizationsPage() {
         setShowCreate(false);
         setForm({ name: '', code: '', type: 'company', parentId: '', address: '', phone: '', description: '' });
         load();
-        // After creating a company, offer to create admin user
         if (form.type === 'company' && isGroupAdmin && res.data?.id) {
           setCreatedOrgId(res.data.id);
           setCreatedOrgName(res.data.name ?? form.name);
@@ -151,70 +152,76 @@ export default function OrganizationsPage() {
   const others = orgs.filter((o) => o.type !== 'company');
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-4">
+
+      {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Tổ chức</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Danh sách công ty và đơn vị trong tập đoàn</p>
-        </div>
+        <p className="text-[12px] text-subtle">
+          {orgs.length > 0 ? `${orgs.length} tổ chức trong hệ thống` : 'Danh sách tổ chức'}
+        </p>
         {isGroupAdmin && (
           <button
             onClick={() => { setForm((f) => ({ ...f, type: 'company' })); setShowCreate(true); }}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg px-3 py-2 transition-colors active:scale-[0.98]"
           >
-            + Tạo công ty
+            <Plus size={14} /> Tạo công ty
           </button>
         )}
         {isCompanyAdmin && (
           <button
             onClick={() => { setForm((f) => ({ ...f, type: 'dept' })); setShowCreate(true); }}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg px-3 py-2 transition-colors active:scale-[0.98]"
           >
-            + Tạo phòng ban
+            <Plus size={14} /> Tạo phòng ban
           </button>
         )}
       </div>
 
       {isLoading ? (
-        <div className="text-center py-16 text-gray-400">Đang tải...</div>
+        <div className="flex items-center justify-center py-16">
+          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        </div>
       ) : error ? (
-        <div className="text-center py-16 text-red-500">{error}</div>
+        <div className="bg-danger-tint border border-danger/20 rounded-xl p-4 text-[12px] text-danger">{error}</div>
       ) : orgs.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
-          <p className="text-lg font-medium">Chưa có tổ chức nào</p>
+        <div className="bg-surface border border-default rounded-xl shadow-card flex flex-col items-center justify-center py-16 px-4 text-center">
+          <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mb-4">
+            <Building2 size={20} className="text-faint" />
+          </div>
+          <p className="text-[13px] font-medium text-content">Chưa có tổ chức nào</p>
           {isGroupAdmin && (
-            <p className="text-sm mt-2">Bắt đầu bằng cách tạo một công ty con</p>
+            <p className="text-[12px] text-subtle mt-1">Bắt đầu bằng cách tạo một công ty con</p>
           )}
         </div>
       ) : (
         <div className="space-y-6">
           {/* Companies */}
           {companies.length > 0 && (
-            <div>
-              <h2 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Công ty ({companies.length})</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="space-y-3">
+              <p className="text-[9px] font-medium text-faint uppercase tracking-widest">Công ty ({companies.length})</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {companies.map((org) => (
                   <div
                     key={org.id}
                     onClick={() => router.push(`/organizations/${org.id}`)}
-                    className="bg-white rounded-xl border p-4 cursor-pointer hover:border-blue-400 hover:shadow-sm transition-all"
+                    className="bg-surface border border-default rounded-xl shadow-card p-4 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
                   >
                     <div className="flex items-start justify-between">
-                      <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
-                        <span className="text-blue-700 font-bold text-sm">{org.code?.slice(0, 2) ?? org.name[0]}</span>
+                      <div className="w-10 h-10 rounded-lg bg-primary-tint flex items-center justify-center flex-shrink-0">
+                        <span className="text-primary font-medium text-[13px]">{org.code?.slice(0, 2) ?? org.name[0]}</span>
                       </div>
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                        org.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                        org.isActive ? 'bg-success-tint text-success' : 'bg-muted text-faint'
                       }`}>
                         {org.isActive ? 'Hoạt động' : 'Vô hiệu'}
                       </span>
                     </div>
                     <div className="mt-3">
-                      <p className="font-semibold text-gray-900">{org.name}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">Mã: {org.code ?? '—'}</p>
-                      {org.address && <p className="text-xs text-gray-400 mt-0.5 truncate">{org.address}</p>}
+                      <p className="text-[13px] font-medium text-content">{org.name}</p>
+                      <p className="text-[11px] text-faint mt-0.5 font-mono">Mã: {org.code ?? '—'}</p>
+                      {org.address && <p className="text-[11px] text-subtle mt-0.5 truncate">{org.address}</p>}
                     </div>
-                    <div className="mt-3 pt-3 border-t text-xs text-blue-600 font-medium hover:underline">
+                    <div className="mt-3 pt-3 border-t border-default text-[11px] text-primary font-medium">
                       Quản lý →
                     </div>
                   </div>
@@ -225,39 +232,42 @@ export default function OrganizationsPage() {
 
           {/* Other org types */}
           {others.length > 0 && (
-            <div>
-              <h2 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Đơn vị khác ({others.length})</h2>
-              <div className="bg-white rounded-xl border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-gray-50">
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Tên</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Mã</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Loại</th>
-                      <th className="text-left px-4 py-3 font-medium text-gray-600">Trạng thái</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {others.map((org) => (
-                      <tr
-                        key={org.id}
-                        onClick={() => router.push(`/organizations/${org.id}`)}
-                        className="hover:bg-blue-50 cursor-pointer transition-colors"
-                      >
-                        <td className="px-4 py-3 font-medium text-gray-900">{org.name}</td>
-                        <td className="px-4 py-3 text-gray-500">{org.code ?? '—'}</td>
-                        <td className="px-4 py-3 text-gray-500">{ORG_TYPE_LABEL[org.type ?? ''] ?? org.type ?? '—'}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            org.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                          }`}>
-                            {org.isActive ? 'Hoạt động' : 'Vô hiệu'}
-                          </span>
-                        </td>
+            <div className="space-y-3">
+              <p className="text-[9px] font-medium text-faint uppercase tracking-widest">Đơn vị khác ({others.length})</p>
+              <div className="bg-surface border border-default rounded-xl shadow-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-default">
+                        <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Tên</th>
+                        <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Mã</th>
+                        <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Loại</th>
+                        <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Trạng thái</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {others.map((org) => (
+                        <tr
+                          key={org.id}
+                          onClick={() => router.push(`/organizations/${org.id}`)}
+                          className="border-b border-default last:border-0 hover:bg-muted cursor-pointer transition-colors"
+                        >
+                          <td className="px-4 py-3 text-[12px] font-medium text-content">{org.name}</td>
+                          <td className="px-4 py-3 text-[11px] text-subtle font-mono">{org.code ?? '—'}</td>
+                          <td className="px-4 py-3 text-[11px] text-subtle">{ORG_TYPE_LABEL[org.type ?? ''] ?? org.type ?? '—'}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                              org.isActive ? 'bg-success-tint text-success' : 'bg-muted text-faint'
+                            }`}>
+                              {org.isActive && <span className="w-1.5 h-1.5 bg-success rounded-full" />}
+                              {org.isActive ? 'Hoạt động' : 'Vô hiệu'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -267,54 +277,56 @@ export default function OrganizationsPage() {
       {/* Create modal */}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-xl">
-            <div className="px-6 py-5 border-b flex items-center justify-between">
-              <h2 className="font-semibold text-gray-900">
+          <div className="bg-surface rounded-xl shadow-card border border-default w-full max-w-md">
+            <div className="px-5 py-4 border-b border-default flex items-center justify-between">
+              <h2 className="text-[14px] font-medium text-content">
                 {isCompanyAdmin ? 'Tạo phòng ban / nhóm' : 'Tạo tổ chức mới'}
               </h2>
-              <button onClick={() => setShowCreate(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              <button onClick={() => setShowCreate(false)} className="text-faint hover:text-content transition-colors">
+                <X size={16} />
+              </button>
             </div>
-            <form onSubmit={handleCreate} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tên tổ chức <span className="text-red-500">*</span></label>
+            <form onSubmit={handleCreate} className="p-5 space-y-3">
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Tên tổ chức <span className="text-danger">*</span></label>
                 <input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   required
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputClass}
                   placeholder="Công ty TNHH XYZ"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Mã tổ chức <span className="text-red-500">*</span></label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Mã tổ chức <span className="text-danger">*</span></label>
                 <input
                   value={form.code}
                   onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
                   required
                   maxLength={20}
-                  className="w-full rounded-lg border px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={`${inputClass} font-mono`}
                   placeholder="CTYXYZ"
                 />
-                <p className="text-xs text-gray-400 mt-1">Mã duy nhất, viết hoa, không dấu</p>
+                <p className="text-[11px] text-faint">Mã duy nhất, viết hoa, không dấu</p>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Loại tổ chức</label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Loại tổ chức</label>
                 <select
                   value={form.type}
                   onChange={(e) => setForm({ ...form, type: e.target.value as typeof form.type })}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-content focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 bg-surface"
                 >
                   {isGroupAdmin && <option value="company">Công ty</option>}
                   <option value="dept">Phòng ban</option>
                   <option value="team">Nhóm</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tổ chức cha</label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Tổ chức cha</label>
                 <select
                   value={form.parentId}
                   onChange={(e) => setForm({ ...form, parentId: e.target.value })}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-content focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 bg-surface"
                 >
                   <option value="">— Không có (trực thuộc tập đoàn) —</option>
                   {orgs.map((o) => (
@@ -322,39 +334,39 @@ export default function OrganizationsPage() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Địa chỉ</label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Địa chỉ</label>
                 <input
                   value={form.address}
                   onChange={(e) => setForm({ ...form, address: e.target.value })}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputClass}
                   placeholder="123 Đường ABC, TP.HCM"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Điện thoại</label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Điện thoại</label>
                 <input
                   value={form.phone}
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputClass}
                   placeholder="028 1234 5678"
                 />
               </div>
               {saveError && (
-                <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{saveError}</p>
+                <div className="bg-danger-tint border border-danger/20 rounded-lg px-3 py-2 text-[12px] text-danger">{saveError}</div>
               )}
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => setShowCreate(false)}
-                  className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="flex-1 rounded-lg border border-default px-4 py-2 text-[12px] font-medium text-subtle hover:bg-muted transition-colors"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="flex-1 rounded-lg bg-primary hover:bg-primary-dark px-4 py-2 text-[12px] font-medium text-white transition-colors disabled:opacity-50"
                 >
                   {saving ? 'Đang lưu...' : 'Tạo tổ chức'}
                 </button>
@@ -367,54 +379,54 @@ export default function OrganizationsPage() {
       {/* Step 2: Create company admin */}
       {showAdminStep && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-xl">
-            <div className="px-6 py-5 border-b">
-              <h2 className="font-semibold text-gray-900">Tạo tài khoản quản trị</h2>
-              <p className="text-sm text-gray-500 mt-0.5">
+          <div className="bg-surface rounded-xl shadow-card border border-default w-full max-w-md">
+            <div className="px-5 py-4 border-b border-default">
+              <h2 className="text-[14px] font-medium text-content">Tạo tài khoản quản trị</h2>
+              <p className="text-[12px] text-subtle mt-0.5">
                 Công ty <strong>{createdOrgName}</strong> đã được tạo. Tạo tài khoản admin để quản lý công ty này.
               </p>
             </div>
-            <form onSubmit={handleCreateAdmin} className="p-6 space-y-4">
-              <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800">
+            <form onSubmit={handleCreateAdmin} className="p-5 space-y-3">
+              <div className="bg-primary-tint border border-primary/15 rounded-lg px-3 py-2 text-[12px] text-primary">
                 Hệ thống sẽ tự động gửi email thông tin đăng nhập đến địa chỉ email bên dưới.
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Họ và tên <span className="text-red-500">*</span></label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Họ và tên <span className="text-danger">*</span></label>
                 <input
                   value={adminForm.fullName}
                   onChange={(e) => setAdminForm({ ...adminForm, fullName: e.target.value })}
                   required
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputClass}
                   placeholder="Nguyễn Văn A"
                   autoFocus
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email <span className="text-red-500">*</span></label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Email <span className="text-danger">*</span></label>
                 <input
                   type="email"
                   value={adminForm.email}
                   onChange={(e) => setAdminForm({ ...adminForm, email: e.target.value })}
                   required
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputClass}
                   placeholder="admin@congty.vn"
                 />
               </div>
               {adminError && (
-                <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{adminError}</p>
+                <div className="bg-danger-tint border border-danger/20 rounded-lg px-3 py-2 text-[12px] text-danger">{adminError}</div>
               )}
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => { setShowAdminStep(false); setCreatedOrgId(null); toast('success', 'Đã tạo công ty. Bạn có thể tạo admin sau từ trang tổ chức.'); }}
-                  className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="flex-1 rounded-lg border border-default px-4 py-2 text-[12px] font-medium text-subtle hover:bg-muted transition-colors"
                 >
                   Bỏ qua
                 </button>
                 <button
                   type="submit"
                   disabled={savingAdmin}
-                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="flex-1 rounded-lg bg-primary hover:bg-primary-dark px-4 py-2 text-[12px] font-medium text-white transition-colors disabled:opacity-50"
                 >
                   {savingAdmin ? 'Đang tạo...' : 'Tạo & gửi email'}
                 </button>

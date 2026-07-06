@@ -2,12 +2,13 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { Building2, Check, ArrowLeft } from 'lucide-react';
 
 export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState('');
+  const [email,   setEmail]   = useState('');
   const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
-  const [error, setError] = useState('');
+  const [done,    setDone]    = useState(false);
+  const [error,   setError]   = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -16,9 +17,9 @@ export default function ForgotPasswordPage() {
     setError('');
     try {
       const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
+        body:    JSON.stringify({ email: email.trim() }),
       }).then((r) => r.json());
 
       if (res.success) {
@@ -34,76 +35,100 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-md bg-white rounded-xl shadow-md p-8">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Quên mật khẩu</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Đặt lại mật khẩu qua email</p>
-        </div>
+    <div className="min-h-screen flex items-center justify-center bg-muted">
+      <div className="w-full max-w-sm mx-4">
+        <div className="bg-surface rounded-xl border border-default shadow-card p-6">
 
-        {done ? (
-          <div className="space-y-5 text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
-              <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
+          {/* Logo */}
+          <div className="flex justify-center mb-5">
+            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+              <Building2 size={18} className="text-white" />
             </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">Kiểm tra hộp thư của bạn</h2>
-              <p className="mt-2 text-sm text-gray-600">
-                Nếu địa chỉ <strong>{email}</strong> tồn tại trong hệ thống, chúng tôi đã gửi email hướng dẫn đặt lại mật khẩu.
-              </p>
-              <p className="mt-2 text-sm text-gray-500">
-                Không nhận được email? Kiểm tra thư mục spam hoặc{' '}
-                <button
-                  onClick={() => { setDone(false); setEmail(''); }}
-                  className="text-blue-600 hover:underline"
-                >
-                  thử lại
-                </button>.
-              </p>
-            </div>
-            <Link href="/login" className="inline-block text-sm text-blue-600 hover:underline">
-              Quay lại đăng nhập
-            </Link>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <p className="text-sm text-gray-600">
-              Nhập địa chỉ email của bạn. Chúng tôi sẽ gửi liên kết đặt lại mật khẩu (có hiệu lực trong <strong>1 giờ</strong>).
-            </p>
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-gray-700">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.vn"
-                autoFocus
-                required
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
 
-            {error && (
-              <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading || !email.trim()}
-              className="w-full py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? 'Đang gửi...' : 'Gửi liên kết đặt lại mật khẩu'}
-            </button>
-
-            <div className="text-center">
-              <Link href="/login" className="text-sm text-gray-500 hover:text-blue-600">
-                ← Quay lại đăng nhập
+          {done ? (
+            /* ── Success state ── */
+            <div className="text-center space-y-4">
+              <div className="w-12 h-12 bg-success-tint rounded-full flex items-center justify-center mx-auto">
+                <Check size={20} className="text-success" />
+              </div>
+              <div>
+                <h2 className="text-[15px] font-medium text-content">Kiểm tra hộp thư của bạn</h2>
+                <p className="text-[12px] text-subtle mt-2 leading-relaxed">
+                  Nếu địa chỉ <span className="font-medium text-content">{email}</span> tồn tại
+                  trong hệ thống, chúng tôi đã gửi email hướng dẫn đặt lại mật khẩu.
+                </p>
+                <p className="text-[11px] text-faint mt-2">
+                  Không nhận được email? Kiểm tra thư mục spam hoặc{' '}
+                  <button
+                    onClick={() => { setDone(false); setEmail(''); }}
+                    className="text-primary hover:text-primary-dark transition-colors"
+                  >
+                    thử lại
+                  </button>.
+                </p>
+              </div>
+              <Link
+                href="/login"
+                className="inline-flex items-center gap-1.5 text-[12px] text-primary hover:text-primary-dark transition-colors"
+              >
+                <ArrowLeft size={13} /> Quay lại đăng nhập
               </Link>
             </div>
-          </form>
-        )}
+          ) : (
+            /* ── Form ── */
+            <>
+              <div className="text-center mb-5">
+                <h1 className="text-[17px] font-medium text-content">Quên mật khẩu</h1>
+                <p className="text-[12px] text-subtle mt-1">Đặt lại mật khẩu qua email</p>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <p className="text-[12px] text-subtle leading-relaxed">
+                  Nhập địa chỉ email của bạn. Chúng tôi sẽ gửi liên kết đặt lại mật khẩu
+                  (hiệu lực trong <span className="font-medium text-content">1 giờ</span>).
+                </p>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[12px] font-medium text-content">Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@company.vn"
+                    autoFocus
+                    required
+                    className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-content placeholder:text-faint focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors"
+                  />
+                </div>
+
+                {error && (
+                  <div className="rounded-lg bg-danger-tint px-3 py-2 text-[12px] text-danger">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading || !email.trim()}
+                  className="w-full bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg py-2.5 transition-colors active:scale-[0.98] disabled:opacity-50"
+                >
+                  {loading ? 'Đang gửi...' : 'Gửi liên kết đặt lại mật khẩu'}
+                </button>
+
+                <div className="text-center">
+                  <Link
+                    href="/login"
+                    className="inline-flex items-center gap-1.5 text-[12px] text-subtle hover:text-content transition-colors"
+                  >
+                    <ArrowLeft size={13} /> Quay lại đăng nhập
+                  </Link>
+                </div>
+              </form>
+            </>
+          )}
+
+        </div>
       </div>
     </div>
   );

@@ -145,7 +145,7 @@ export async function getCourses(
   // Gắn flag isShared cho mỗi khóa học
   const itemsWithFlag = items.map((c) => ({
     ...c,
-    isShared: c.ownerCompanyId !== companyId,
+    isShared: c.isPublished && c.ownerCompanyId !== companyId,
     publications: undefined, // không expose raw relation
   }));
 
@@ -209,6 +209,60 @@ export async function deleteCourse(
   await invalidateCourseCache(courseId);
 }
 
+// Các loại content cần có asset READY trước khi xuất bản
+const CONTENT_TYPES_NEED_ASSET = new Set(['video', 'document', 'pdf', 'audio', 'presentation', 'image']);
+
+export async function getCourseReadiness(courseId: string) {
+  const sections = await prisma.courseSection.findMany({
+    where: { courseId },
+    orderBy: { displayOrder: 'asc' },
+    include: {
+      lessons: {
+        orderBy: { displayOrder: 'asc' },
+        include: {
+          assets: {
+            where: { isActive: true },
+            select: { processingStatus: true },
+          },
+        },
+      },
+    },
+  });
+
+  type LessonBrief = { id: string; title: string; contentType: string; reason: string };
+  const notReady: LessonBrief[]   = [];
+  const processing: LessonBrief[] = [];
+  let total = 0;
+  let ready = 0;
+
+  for (const sec of sections) {
+    for (const les of sec.lessons) {
+      total++;
+      if (!CONTENT_TYPES_NEED_ASSET.has(les.contentType)) { ready++; continue; }
+
+      const statuses = les.assets.map(a => a.processingStatus);
+      if (statuses.includes('READY')) { ready++; continue; }
+      if (statuses.includes('PROCESSING') || statuses.includes('PENDING')) {
+        processing.push({ id: les.id, title: les.title, contentType: les.contentType, reason: 'Đang xử lý' });
+      } else if (statuses.length === 0) {
+        notReady.push({ id: les.id, title: les.title, contentType: les.contentType, reason: 'Chưa có file' });
+      } else {
+        // tất cả đều FAILED
+        notReady.push({ id: les.id, title: les.title, contentType: les.contentType, reason: 'Xử lý thất bại' });
+      }
+    }
+  }
+
+  return {
+    isReady: sections.length > 0 && total > 0 && notReady.length === 0 && processing.length === 0,
+    sectionsCount: sections.length,
+    totalLessons: total,
+    readyLessons: ready,
+    notReadyLessons: notReady,
+    processingLessons: processing,
+  };
+}
+
 export async function publishCourse(
   courseId: string,
   input: PublishCourseInput,
@@ -218,6 +272,26 @@ export async function publishCourse(
 ) {
   const course = await assertCourseAccess(courseId, companyId, userId, roles, true);
   const isGroupAdmin = roles.includes('group_admin');
+
+  // ── Kiểm tra nội dung sẵn sàng trước khi xuất bản ──────────
+  const readiness = await getCourseReadiness(courseId);
+
+  if (readiness.sectionsCount === 0) {
+    throw new ValidationError('Khóa học chưa có chương nào. Thêm ít nhất 1 chương trước khi xuất bản.');
+  }
+  if (readiness.totalLessons === 0) {
+    throw new ValidationError('Khóa học chưa có bài học nào. Thêm ít nhất 1 bài học trước khi xuất bản.');
+  }
+  if (readiness.processingLessons.length > 0) {
+    const names = readiness.processingLessons.slice(0, 3).map(l => `"${l.title}"`).join(', ');
+    const more  = readiness.processingLessons.length > 3 ? ` và ${readiness.processingLessons.length - 3} bài khác` : '';
+    throw new ValidationError(`Còn ${readiness.processingLessons.length} bài học đang xử lý: ${names}${more}. Vui lòng chờ hoàn tất.`);
+  }
+  if (readiness.notReadyLessons.length > 0) {
+    const names = readiness.notReadyLessons.slice(0, 3).map(l => `"${l.title}" (${l.reason})`).join(', ');
+    const more  = readiness.notReadyLessons.length > 3 ? ` và ${readiness.notReadyLessons.length - 3} bài khác` : '';
+    throw new ValidationError(`${readiness.notReadyLessons.length} bài học chưa có nội dung sẵn sàng: ${names}${more}.`);
+  }
 
   // Publish internally (company_admin/instructor marks as published)
   await prisma.course.update({ where: { id: courseId }, data: { isPublished: true } });

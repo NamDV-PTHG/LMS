@@ -22,7 +22,17 @@ export const POST = withRole(
     try {
       const body = await req.json();
       if (!body.title?.trim()) return NextResponse.json({ success: false, error: 'Tên vị trí là bắt buộc', code: 'VALIDATION_ERROR' }, { status: 400 });
-      const data = await createPosition(companyId, body);
+      const data = await createPosition(companyId, {
+        title: body.title,
+        code: body.code || undefined,
+        level: body.level || undefined,
+        description: body.description || undefined,
+        organizationId: body.organizationId || undefined,
+        competencyFrameworkId: body.competencyFrameworkId || undefined,
+        learningPathId: body.learningPathId || undefined,
+        catalogId: body.catalogId ?? null,
+        impliedRole: body.impliedRole ?? null,
+      });
       return NextResponse.json({ success: true, data }, { status: 201 });
     } catch (err) {
       return handleApiError(err);

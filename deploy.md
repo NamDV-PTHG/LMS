@@ -3,6 +3,861 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-06 11:30] feat: Hoàn thiện hệ thống Restore — fix bugs + BullMQ + progress polling + company filter
+
+**Loại:** feature + fix
+
+**Các thay đổi:**
+- `prisma/schema.prisma`: Thêm `restoreNote String?` và `restoredAt DateTime?` vào `BackupJob`
+- `src/app/api/admin/backup/[id]/route.ts` (NEW): GET single backup job — dùng cho polling
+- `src/app/api/admin/backup/[id]/restore/route.ts`: Fix bugs (pg_restore `--dbname=`, asset path `slice()`), thêm `reason` persist, chuyển sang enqueue BullMQ thay fire-and-forget
+- `src/jobs/backup.job.ts`: Thêm `restoreQueue` + `startRestoreWorker()` — restore chạy trong BullMQ worker có tracking đầy đủ, fix pg_restore exit code (0 và 1 đều ok)
+- `src/jobs/worker.ts`: Đăng ký `startRestoreWorker()`
+- `src/components/ui/confirm-dialog.tsx`: Refactor — `message` nhận `ReactNode`, `onConfirm(inputValue: string)` tự quản lý textarea state, thêm `variant` prop
+- `src/components/question-bank/review-queue.tsx` + `question-list.tsx`: Cập nhật theo API mới của ConfirmDialog
+- `src/app/(dashboard)/operations/page.tsx`: Auto-poll mỗi 3s khi job RUNNING/RESTORING/PENDING, restore dialog hiển thị thông tin backup + company selector + warning rõ ràng, pass `scopeCompanyId`, show restoreNote/restoredAt, RESTORING spinner
+
+**Kết quả:**
+- `prisma db push` + `prisma generate` → schema synced
+- `npm run build` → build thành công
+- `pm2 restart lms-web lms-worker` → cả hai online
+
+**Lưu ý / Rủi ro:**
+- Restore DB vẫn là direct restore (--clean --if-exists) — sẽ có brief downtime khi pg_restore chạy
+- Zero-downtime DB restore (shadow DB swap) để trong roadmap tương lai
+- Assets restore không có downtime (MinIO putObject là atomic per-object)
+
+---
+
+## [2026-07-06 10:30] feat: Folder Browser modal cho LOCAL backup path
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/api/admin/backup/browse/route.ts` (NEW): API duyệt thư mục server — GET list subdirs + drives (Windows/Unix), POST tạo thư mục mới. group_admin only
+- `src/app/(dashboard)/settings/page.tsx`: Thêm nút "Browse…" bên cạnh input localPath, thêm modal FolderBrowser (breadcrumb, list thư mục, double-click navigate, tạo thư mục mới inline, kiểm tra quyền ghi)
+
+**Kết quả:**
+- `npm run build` → build thành công (settings 11.6 kB)
+- `pm2 restart lms-web lms-worker` → cả hai online
+
+**Lưu ý / Rủi ro:**
+- API chỉ list thư mục (không file), filter bỏ `$` system dirs trên Windows
+- Nút "Chọn thư mục này" disabled nếu thư mục không có quyền ghi
+
+---
+
+## [2026-07-06 10:00] feat: Thêm đích lưu trữ backup LOCAL (ổ đĩa server)
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `prisma/schema.prisma`: Thêm `LOCAL` vào enum `BackupDestination`, thêm field `localPath String?` vào `BackupStorageConfig`, đổi default từ `MINIO_REMOTE` → `LOCAL`
+- `src/lib/backup-storage.ts`: Thêm `LocalAdapter` (Node.js `fs` + recursive walk), thêm `case 'LOCAL'` vào factory
+- `src/app/api/admin/backup-config/route.ts`: Thêm `localPath` vào PUT handler
+- `src/app/(dashboard)/settings/page.tsx`: Thêm option "Local Server" vào destination selector, thêm panel cấu hình đường dẫn thư mục
+
+**Kết quả:**
+- `prisma db push` → schema synced
+- `prisma generate` → Prisma Client regenerated (stop PM2 trước)
+- `npm run build` → build thành công
+- `pm2 restart lms-web lms-worker` → cả hai online
+
+**Lưu ý / Rủi ro:**
+- LOCAL backup không bảo vệ khỏi hỏng ổ đĩa server — nên dùng kết hợp với remote destination
+- Đường dẫn mặc định nếu để trống: `{project_root}/backups`
+
+---
+
+## [2026-07-06 08:48] config: Gia hạn SSL wildcard *.phuthaiholdings.com — Sectigo đến 16/01/2027
+
+**Loại:** config
+
+**Các thay đổi:**
+- Tạo `C:/nginx/ssl/pth-fullchain-new.pem` từ 3 file: `cert` + `My_CA_Bundle` + `TrustedRoot` (Sectigo)
+- Cập nhật `C:/nginx/conf/lms-staging.conf`: ssl_certificate → `pth-fullchain-new.pem`, ssl_certificate_key → `Privatekey.key`
+- Reload nginx
+
+**Kết quả:**
+- Nginx reload thành công (syntax OK)
+- Cert đang serve: CN=*.phuthaiholdings.com, notAfter=Jan 16 23:59:59 2027 GMT
+- Xác minh qua `openssl s_client` — OK
+
+**Lưu ý / Rủi ro:**
+- Cert cũ: `pth-fullchain.pem` + `PTH.key` (đã hết hạn) — giữ lại để rollback nếu cần
+- Cần gia hạn lại trước 16/01/2027
+
+---
+
+## [2026-07-02 17:00] feat: UI Backup Storage (Settings) + tab Sao lưu (Operations) — hoàn thiện toàn bộ backup system
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/(dashboard)/settings/page.tsx`: Tab "Backup Storage" — chọn destination (MinIO/NAS, GCS, Google Drive), nhập credentials (secrets masked), cron schedule, retention days, Test kết nối
+- `src/app/(dashboard)/operations/page.tsx`: Tab "Sao lưu" — list backup jobs, trigger manual (Full/DB/Assets), nút Khôi phục DB / Assets / Toàn bộ với ConfirmDialog
+
+**Kết quả:**
+- Build OK, lms-web + lms-worker online
+
+---
+
+## [2026-07-02 16:00] feat: Backup/Restore system — BackupStorageConfig, BackupJob, BullMQ worker, API routes
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `prisma/schema.prisma` — Thêm model `BackupStorageConfig` (singleton), `BackupJob`, và 3 enums: `BackupDestination`, `BackupType`, `BackupStatus`. Thêm relation `backupJobs` vào User model
+- `src/lib/backup-storage.ts` — Tạo mới: `BackupAdapter` interface + 3 concrete adapters (`MinioRemoteAdapter`, `GcsAdapter`, `GoogleDriveAdapter`) + factory `createBackupAdapter()`
+- `src/services/backup.service.ts` — Tạo mới: `getBackupConfig`, `saveBackupConfig`, `testBackupConnection`, `listBackupJobs`, `getBackupJob`
+- `src/jobs/backup.job.ts` — Tạo mới: BullMQ `backupQueue` + `startBackupWorker()` — xử lý pg_dump, copy MinIO assets, cleanup retention
+- `src/jobs/cron.ts` — Thêm cron động từ `BackupStorageConfig.cronSchedule` (mặc định `0 2 * * *`)
+- `src/jobs/worker.ts` — Thêm `startBackupWorker()` vào danh sách workers
+- `src/app/api/admin/backup-config/route.ts` — GET (masked secrets) + PUT (upsert config)
+- `src/app/api/admin/backup-config/test/route.ts` — POST test connection
+- `src/app/api/admin/backup/route.ts` — GET list jobs + POST trigger manual backup
+- `src/app/api/admin/backup/[id]/restore/route.ts` — POST restore (DB + assets, async fire-and-forget)
+
+**Kết quả:**
+- Chưa chạy migration (cần `npx prisma db push` + `prisma generate` + `npm run build` + `pm2 restart`)
+- Code written only — build/deploy chờ lệnh từ user
+
+**Lưu ý / Rủi ro:**
+- Cần cài `googleapis` package nếu dùng GCS/Google Drive adapters (`npm i googleapis @google-cloud/storage`)
+- `pg_dump` / `pg_restore` phải có sẵn trong PATH trên server
+- Restore DB là destructive (`--clean --if-exists`) — cần cẩn thận khi dùng trong production
+
+## [2026-07-02 15:30] fix: App PWA hiển thị khóa học từ lộ trình học tập (source 4)
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/enrollment.service.ts`: Thêm source thứ 4 `learning_path` vào SQL UNION — join qua `LearningPathEnrollment` → `LearningPathStepEnrollment` (isUnlocked=true) → `LearningPathStep` → `Course`. Priority = 4 (thấp nhất), bị override nếu course đã có trong 3 nguồn kia.
+- `src/services/user.service.ts`: Sau khi enroll path, gọi `invalidateMyCoursesCache(userId)` để app làm mới danh sách ngay lập tức.
+- `src/app/(pwa)/app/progress/page.tsx`: Thêm `'learning_path'` vào type `CourseRow['source']`, `sourceLabel` trả `'Lộ trình'`, `SOURCE_STYLE` màu tím.
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Backfill thủ công 4 enrollment cho `nam.dv@phuthaiholdings.com` (vị trí đã gán trước khi deploy auto-enrollment)
+- App `/app/courses` và `/app/progress` giờ hiển thị đủ khóa học từ lộ trình học tập
+
+**Lưu ý / Rủi ro:**
+- Chỉ hiển thị courses từ bước đã **unlock** (`isUnlocked=true`) — bước bị khóa chưa hiện
+- Nếu course vừa có trong group_publish vừa có trong learning_path → ưu tiên group_publish (priority 1)
+
+## [2026-07-02 10:30] feat: Position→Auto-enrollment — gán vị trí cho user tự động enroll lộ trình học
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/services/user.service.ts`: Thêm param `updatedById` vào `updateUser()`, detect thay đổi `jobPositionId`, pause tất cả `IN_PROGRESS` enrollments của vị trí cũ, enroll lộ trình mới qua helper `enrollUserInPositionPaths()` (fire-and-forget). Ưu tiên per-framework paths, fallback legacy `learningPathId`.
+- `src/app/api/users/[id]/route.ts`: Truyền `user.id` làm argument thứ 5 vào `updateUser()`.
+- `src/app/api/positions/[id]/route.ts`: Sau khi update vị trí, nếu `learningPathId` thay đổi sang giá trị mới → enroll cascade tất cả users đang giữ vị trí đó (fire-and-forget).
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → `online`
+- Quy trình: Gán vị trí có path → user vào `/my-learning-paths` thấy lộ trình IN_PROGRESS ngay
+- Thay vị trí cũ → enrollments IN_PROGRESS cũ PAUSED, lộ trình mới IN_PROGRESS
+- Thêm path vào vị trí → cascade enroll tất cả holders
+
+**Lưu ý / Rủi ro:**
+- Enrollment fire-and-forget: lỗi bị silent (đã `.catch(() => {})`), tránh block response
+- `ALREADY_ENROLLED` bị ignore → an toàn khi gán cùng vị trí nhiều lần
+- `PositionChangeEvent` workflow (BullMQ + HR approval) không bị ảnh hưởng
+
+## [2026-07-02 12:00] fix: Đồng bộ quy tắc mật khẩu và invalidate token sau đổi mật khẩu
+
+**Loại:** fix (security)
+
+**Root cause:**
+3 route xử lý đổi/đặt lại mật khẩu có quy tắc validation KHÁC NHAU:
+- `POST /api/auth/change-password`: min 8 + chữ hoa + chữ số + invalidate refresh token ✓
+- `PATCH /api/auth/me`: chỉ min 8, không invalidate token ✗
+- `POST /api/auth/reset-password`: chỉ min 8 ✗
+
+Người dùng có thể đặt mật khẩu yếu qua 2 route kia, bypass chính sách bảo mật.
+
+**Các thay đổi:**
+- `src/app/api/auth/me/route.ts` — thêm regex /[A-Z]/ và /[0-9]/, thêm `redisDel(refresh:userId)`, set `mustChangePassword: false`
+- `src/app/api/auth/reset-password/route.ts` — thêm regex /[A-Z]/ và /[0-9]/
+- `src/app/(auth)/reset-password/page.tsx` — thêm client-side validation uppercase + digit, cập nhật hint text
+- `src/app/(dashboard)/profile/page.tsx` — thêm client-side validation uppercase + digit, cập nhật hint text
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` — online
+- Cả 3 luồng đổi mật khẩu giờ đồng nhất: min 8 ký tự + 1 chữ hoa + 1 chữ số
+
+**Lưu ý / Rủi ro:**
+- Các user đã có mật khẩu yếu từ trước không bị ảnh hưởng ngay — chỉ áp dụng khi đổi/reset lần tới
+
+## [2026-07-02 11:30] fix: Nút xuất bản khóa học báo lỗi hệ thống
+
+**Loại:** fix
+
+**Root cause:**
+Route `POST /api/courses/[id]/publish` bị viết lại với schema riêng yêu cầu bắt buộc `targetCompanyIds` (dành cho chia sẻ liên công ty). Khi frontend gọi để **xuất bản đơn giản** (không có body), Zod validate fail → 500.
+
+Service `publishCourse()` trong `course.service.ts` đã xử lý đúng cả hai case (`targetCompanyIds` là optional), nhưng route không gọi service này.
+
+**Các thay đổi:**
+- `src/app/api/courses/[id]/publish/route.ts` — viết lại hoàn toàn để sử dụng `publishCourse()` từ service:
+  - Body rỗng → xuất bản khóa học (`isPublished = true`)
+  - Body có `targetCompanyIds` → chia sẻ liên công ty (group_admin)
+  - Parse body với `try/catch` để chấp nhận body rỗng
+  - Dùng `publishCourseSchema` từ service (targetCompanyIds là optional)
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` — online
+
+## [2026-07-02 11:00] feat: Gán vị trí công việc cho học viên trong trang /users/[id]
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/(dashboard)/users/[id]/page.tsx` — thêm section "Vị trí công việc":
+  - Load danh sách vị trí từ `/api/positions?isActive=true`
+  - Hiển thị vị trí hiện tại (badge xanh với title, code, level)
+  - Dropdown chọn vị trí + nút "Lưu vị trí" → PATCH `jobPositionId`
+  - Nút disabled khi vị trí chưa thay đổi hoặc chưa có vị trí nào trong hệ thống
+  - Cảnh báo nếu chưa có vị trí nào (gợi ý vào mục Vị trí công việc để tạo)
+- Backend đã sẵn sàng: `updateUserSchema` có `jobPositionId`, `getUserById` select `jobPosition`
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` — online
+
+**Lưu ý / Rủi ro:**
+- Section xuất hiện giữa "Vai trò" và "Hồ sơ Năng lực"
+- Chọn "-- Bỏ gán vị trí --" → gửi `jobPositionId: null` để xóa gán
+
+## [2026-07-02 10:30] fix: Xóa toàn bộ vi phạm system dialog (alert/confirm/prompt)
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/components/reports/export-button.tsx` — thay `alert()` lỗi xuất báo cáo bằng `toast('error', ...)`
+- `src/components/question-bank/review-queue.tsx` — thay `confirm()` duyệt tất cả và `prompt()` từ chối bằng `ConfirmDialog`
+- `src/components/question-bank/question-list.tsx` — thay `confirm()` xóa câu hỏi và `prompt()` từ chối bằng `ConfirmDialog`
+- `src/app/(dashboard)/competency-frameworks/[id]/page.tsx` — thay `confirm()` xóa lĩnh vực và xóa năng lực bằng `ConfirmDialog`
+- Dùng lại `src/components/ui/confirm-dialog.tsx` đã tạo từ session trước
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` — online
+- Không còn vi phạm nào với `alert()` / `confirm()` / `prompt()` trong toàn codebase
+
+**Lưu ý / Rủi ro:**
+- `ConfirmDialog` với `inputRequired` sẽ disable nút xác nhận khi textarea trống — yêu cầu nhập lý do từ chối trước khi submit
+
+## [2026-07-02 14:00] Fix 5 bugs CRITICAL + Feature Favicon + AI Usage Report + AI Permission
+
+**Loại:** fix + feature
+
+**Các thay đổi:**
+
+### Bugs đã fix:
+- **Fix 1 (CRITICAL)** `src/services/learning-path.service.ts:158` + `src/app/api/learning-paths/[id]/enroll/route.ts` — Enrollment lộ trình học báo lỗi hệ thống: User model không có field `companyId` trực tiếp → đổi sang filter qua `roles.some.organization`
+- **Fix 2** `src/app/(dashboard)/learning-paths/[id]/page.tsx` + `learning-groups/[id]/page.tsx` — Khóa học chưa xuất bản hiện trong danh mục lộ trình: sửa `?status=published` → `?published=true`
+- **Fix 3** `src/services/course.service.ts` — Khóa học chưa xuất bản hiển thị nhãn "Được chia sẻ": thêm check `isPublished` trong `isShared`
+- **Fix 4 (CRITICAL)** `src/app/api/auth/change-password/route.ts:29` — Đổi mật khẩu báo lỗi 500: `authUser.sub` → `authUser.id`
+- **Fix 5** `src/app/api/my/profile/route.ts` — GET /api/my/profile Prisma error: xóa `status` và `progressPercent` (không tồn tại trong Enrollment model), dùng `completedAt`
+
+### Features mới:
+- **Favicon upload** — Settings page + `/api/public/branding` + Dashboard layout (FaviconInjector)
+- **AI Usage Report** — Dashboard báo cáo với KPI cards, Line Chart (lưu lượng theo ngày), Bar Chart ngang (top users), Pie Chart (tính năng), bảng lịch sử
+- **AI Permission** — Field `aiEnabled` trên User model; toggle trong `/users/[id]`; badge "AI" trong danh sách users
+- **AI Usage Logging** — `AiUsageLog` model mới; `callLlm()` ghi log token/cost sau mỗi call
+- **Sidebar nav** — Thêm "Báo cáo AI" cho group_admin và company_admin
+
+**Migration:**
+- `prisma db push` — thêm `User.aiEnabled`, model `AiUsageLog`, `AiServiceConfig.costPerThousandTokens`
+
+**Kết quả:**
+- Build thành công ✓
+- `lms-web` online ✓
+- `lms-worker` online ✓
+
+**Lưu ý / Rủi ro:**
+- Chi phí AI (`costUsd`) chỉ được tính nếu admin cấu hình `costPerThousandTokens` trong AI Config. Ollama self-hosted hiển thị "N/A"
+- `aiEnabled = false` theo mặc định cho tất cả user hiện có
+
+## [2026-07-02 09:30] fix: PWA notifications hoàn toàn không nhận thông báo từ API + web inbox không tự refresh
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/(pwa)/app/notifications/page.tsx`: Rewrite hoàn toàn — trước đây chỉ dùng `deriveNotifications` từ course data (deadline, hoàn thành), bây giờ fetch cả `/api/notifications` để lấy thông báo thật từ admin. Hiển thị 2 section: "Thông báo từ quản trị viên" (API) và derived course notifications nhóm theo ngày. Badge count = API unread + derived unread.
+- `src/components/pwa/bottom-nav.tsx`: Thêm poll `/api/notifications` mỗi 60s để cập nhật badge khi admin gửi thông báo mới.
+- `src/app/(dashboard)/notifications/page.tsx`: Thêm `refreshInterval: 30000` cho SWR inbox để tự refresh mà không cần reload trang.
+
+**Root cause:**
+- PWA app dùng `lib/pwa-notifications.ts` là hệ thống thông báo "fake" (computed từ course data), KHÔNG kết nối gì với API notification thật. Admin gửi bao nhiêu thông báo cũng không xuất hiện trên app.
+- Web inbox không có auto-refresh → user phải reload trang mới thấy thông báo mới.
+
+**Kết quả:**
+- Build sạch, pm2 restart lms-web — status online
+- PWA: mở trang Thông báo → thấy cả thông báo từ admin + course notifications; badge bell cập nhật mỗi 60s
+- Web: inbox tự refresh mỗi 30s; bell badge vẫn poll mỗi 60s như trước
+
+**Lưu ý / Rủi ro:**
+- Derived course notifications vẫn được giữ nguyên bên cạnh admin notifications
+- Read state cho API notifications dùng server (POST /api/notifications/[id]/read); derived notifications vẫn dùng localStorage
+
+## [2026-07-02 09:00] fix: GET /api/notifications crash do query field không tồn tại trên User model
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/api/notifications/route.ts`: Xoá query `prisma.user.findUnique({ select: { organizationId: true } })` — field `organizationId` KHÔNG có trên model `User` (thuộc `UserRole`), gây Prisma runtime error cho toàn bộ GET requests. Thay thế bằng `user.organizationId` có sẵn từ JWT payload (`AuthUser`)
+
+**Root cause:**
+- Toàn bộ GET /api/notifications crash → inbox rỗng, sent history rỗng, badge không cập nhật
+- POST (tạo thông báo) vẫn thành công — dữ liệu có trong DB nhưng không thể đọc ra được
+
+**Kết quả:**
+- Build sạch, `pm2 restart lms-web` — status online
+- Inbox, sent history, bell badge hoạt động đúng
+
+**Lưu ý / Rủi ro:**
+- `user.organizationId` từ JWT là dept/org ID được set lúc login. Nếu user chưa đăng nhập lại sau khi được gán dept mới, dept-based filtering có thể chưa cập nhật (cần re-login)
+
+## [2026-07-01 10:30] feat: cấu hình tiêu đề tab và mô tả website theo từng công ty
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/(dashboard)/settings/page.tsx`: Thêm 2 trường `siteTitle` (tiêu đề tab trình duyệt) và `siteDescription` (meta description) vào `BrandingForm`; thêm section UI "Tab trình duyệt" trong branding tab giữa Logo và Theme presets
+- `src/app/api/me/company/route.ts`: Trả thêm `siteTitle` và `siteDescription` từ `Organization.metadata`
+- `components/web/web-shell.tsx`: Mở rộng `CompanyInfo` interface; useEffect dùng `siteTitle` (fallback `name`) cho `document.title`; tự động inject/cập nhật `<meta name="description">` từ `siteDescription`
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` — status online
+- Admin vào Settings → Thương hiệu → "Tab trình duyệt" để nhập tiêu đề tab và mô tả; lưu vào `Organization.metadata`
+- WebShell tự áp dụng ngay sau khi fetch `/api/me/company`
+
+**Lưu ý / Rủi ro:**
+- Không cần migration Prisma vì dùng JSON `metadata` field sẵn có
+- `siteTitle` nếu để trống → fallback về `companyName` (tên hiển thị sidebar)
+
+## [2026-07-02 10:30] Multi-framework per Position + QuestionCategory + Hybrid Learning Path (Bước 2–5)
+
+**Loại:** feature
+
+**Các thay đổi:**
+
+**Bước 2 — Question Category CRUD:**
+- `src/app/api/question-categories/route.ts` — GET + POST categories per company
+- `src/app/api/question-categories/[id]/route.ts` — PATCH + DELETE (guard: 409 if questions exist)
+- `src/services/question-bank.service.ts` — thêm `categoryId` filter, create/update, saveGeneratedQuestions
+- `src/services/ai-document-processor.ts` — thêm `defaultCategoryId` param → gán cho câu hỏi AI sinh
+- `src/app/api/question-banks/[id]/questions/route.ts` — thêm `?categoryId=` filter
+- `src/app/api/question-banks/[id]/import-csv/route.ts` — thêm cột `category` trong CSV
+- `src/app/api/question-banks/[id]/import-document/route.ts` — thêm `defaultCategoryId` formData
+- `src/components/question-bank/question-form.tsx` — dropdown chọn category
+- `src/components/question-bank/question-list.tsx` — filter + badge category
+- `src/components/question-bank/import-document-modal.tsx` — dropdown "Danh mục mặc định"
+- `src/app/(dashboard)/question-banks/[id]/page.tsx` — tab "Danh mục năng lực" với CRUD modal
+
+**Bước 3 — Multi-framework per Position:**
+- `src/app/api/positions/[id]/frameworks/route.ts` — GET list + POST add framework
+- `src/app/api/positions/[id]/frameworks/[fid]/route.ts` — PATCH update + DELETE remove
+- `src/app/(dashboard)/positions/page.tsx` — modal quản lý multi-framework, weight, isPrimary, learningPath
+
+**Bước 4 — Gap Analysis + Radar refactor:**
+- `src/services/gap-analysis.service.ts` — loop qua tất cả `JobPositionFramework`, weighted readiness, enroll nhiều paths
+- `src/services/competency-radar.service.ts` — multi-framework tabs, weighted overall readiness, `frameworkBreakdown[]`
+- `src/components/charts/competency-radar.tsx` — tab UI: Tổng hợp + per-framework (★ primary)
+
+**Bước 5 — Quiz → Competency measurement:**
+- `src/services/quiz.service.ts` — `updateCompetencyFromCategories()`: weighted score per category → L1-L5 → upsert profile (no downgrade). `startQuiz()` hỗ trợ `filterCategoryIds`
+- `src/app/api/lessons/[lessonId]/quiz-config/route.ts` — thêm `filterCategoryIds` vào schema
+- `src/app/(dashboard)/courses/[id]/lessons/[lessonId]/quiz/page.tsx` — section lọc danh mục năng lực
+
+**Kết quả:**
+- Build: ✓ Compiled successfully
+- pm2 restart lms-web → online
+
+**Lưu ý / Rủi ro:**
+- Backward compat: `JobPosition.competencyFrameworkId` và `learningPathId` cũ vẫn giữ nguyên — gap analysis fallback về legacy nếu `frameworks[]` trống
+- `updateCompetencyFromCategories` chạy luôn (kể cả khi fail quiz) — đo năng lực per-category không phụ thuộc tổng điểm
+- Radar chart: nếu chỉ có 1 framework, hiển thị như cũ (không có tabs)
+
+---
+
+## [2026-07-02 09:00] Fix 5 bugs — Nav, Template, Sync, JobCatalogConfig, Notifications
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `components/web/web-shell.tsx`: Thêm "Tổ chức" nav item cho company_admin và hr_manager (Bug 1)
+- `src/app/(dashboard)/import/page.tsx`: Fix silent catch trong downloadFullTemplate → hiện toast lỗi rõ ràng (Bug 2)
+- `src/app/api/learning-groups/[id]/sync/route.ts`: Thêm company_admin + hr_manager vào withRole (Bug 3)
+- `prisma/schema.prisma`: Thêm model CompanyJobCategory + CompanyJobLevel (per-company config) (Bug 4)
+- `src/app/api/job-title-catalog/config/route.ts`: API mới — GET + PUT để quản lý nhóm/cấp bậc per company (Bug 4)
+- `src/app/(dashboard)/job-title-catalog/page.tsx`: Cập nhật dùng config per-company thay hardcode, thêm modal "Cấu hình nhóm & cấp bậc" (Bug 4)
+- `src/app/api/notifications/route.ts`: Thêm `?view=sent` để admin xem lịch sử đã gửi; group_admin luôn thấy thông báo mình đã gửi (Bug 5)
+- `src/app/(dashboard)/notifications/page.tsx`: Thêm tab "Đã gửi" với lịch sử gửi (Bug 5)
+
+**Kết quả:**
+- `prisma db push` thành công — 2 bảng mới: CompanyJobCategory, CompanyJobLevel
+- Build thành công (93/93 pages)
+- `pm2 restart lms-web && pm2 restart lms-worker` → cả 2 đều online
+
+**Lưu ý / Rủi ro:**
+- CompanyJobCategory/Level mặc định rỗng → UI fallback về hardcoded defaults (junior/mid/senior...) nếu chưa configure
+- Nút "Đồng bộ" nhóm học nay cho phép company_admin/hr_manager, cần đảm bảo syncRuleBasedGroup có tenant isolation nội bộ
+
+## [2026-07-01 10:00] Sprint F+G — Competency Radar + Báo cáo Năng lực
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/services/quiz.service.ts`: Thêm `updateCompetencyFromQuiz()` — quiz pass → tự động cập nhật UserCompetencyProfile theo CompetencyCourseLink
+- `src/services/competency-radar.service.ts`: Service mới — tính readinessScore, domains, radarAxes cho từng user
+- `src/app/api/my/competency-radar/route.ts`: GET endpoint cho user tự xem radar của mình
+- `src/app/api/users/[id]/competency-radar/route.ts`: GET endpoint cho admin/HR xem radar của bất kỳ user
+- `src/components/charts/competency-radar.tsx`: Component RadarChart (Recharts) + ReadinessRing SVG + domain breakdown
+- `src/app/(dashboard)/users/[id]/page.tsx`: Thêm section "Hồ sơ Năng lực" collapsible với CompetencyRadarChart
+- `src/app/(dashboard)/profile/page.tsx`: Thêm section "Hồ sơ Năng lực" collapsible cho user tự xem radar
+- `src/components/charts/competency-matrix.tsx`: Component mới — matrix năng lực theo domain cho báo cáo tổng hợp
+- `src/app/(dashboard)/competency-reports/page.tsx`: Trang mới — 3 tab: Toàn tập đoàn / Theo công ty / Theo phòng ban
+- `src/app/api/reports/group/competency-overview/route.ts`: API tổng hợp readiness theo công ty (group_admin)
+- `src/app/api/reports/company/[companyId]/competency-overview/route.ts`: API chi tiết năng lực theo competency
+- `src/app/api/reports/company/[companyId]/competency-by-dept/route.ts`: API tổng hợp readiness theo phòng ban
+- `components/web/web-shell.tsx`: Thêm route title + nav item "Báo cáo Năng lực" cho group_admin, company_admin, hr_manager
+
+**Kết quả:**
+- Build thành công, không có lỗi TypeScript
+- `pm2 restart lms-web` → status online
+
+**Lưu ý / Rủi ro:**
+- CompetencyMatrix hiển thị worst-first (domain thấp nhất lên trên) để ưu tiên chú ý
+- Quiz → level mapping: ≥90% → targetLevel+1, ≥80% → targetLevel, else → targetLevel-1 (min 1, max 5)
+- Chỉ nâng cấp level, không bao giờ hạ (guard: currentLevel < achievedLevel)
+
+## [2026-07-01 00:00] Sprint A — Danh mục Chức danh per-company
+
+**Loại:** feature + migration
+
+**Các thay đổi:**
+- `prisma/schema.prisma`: Thêm model `JobTitleCatalog` (per-company, @@unique([companyId, code])); thêm `JobPosition.catalogId` + `impliedRole`; thêm `CompetencyFramework.code` + `LearningPath.code` (nullable, @@unique per company); thêm `LearningPathEnrollment.pausedAt` + `pausedReason`
+- `src/services/job-title-catalog.service.ts`: CRUD service với tenant isolation, usage count, code uniqueness guard
+- `src/app/api/job-title-catalog/route.ts` + `[id]/route.ts`: API endpoints (GET/POST/PATCH/DELETE), bảo vệ bởi withRole [group_admin, company_admin, hr_manager]
+- `src/app/(dashboard)/job-title-catalog/page.tsx`: Trang quản lý danh mục chức danh — bảng, modal tạo/sửa, xóa với guard
+- `src/app/(dashboard)/positions/page.tsx`: Thêm combobox chọn từ danh mục, badge "✓ DM" / "Tùy chỉnh"
+- `src/services/position.service.ts` + `src/app/api/positions/route.ts`: Thêm catalogId, impliedRole
+- `components/web/web-shell.tsx`: Thêm nav item "Danh mục Chức danh" (/job-title-catalog) cho group_admin, company_admin, hr_manager
+
+**Kết quả:**
+- `prisma db push --accept-data-loss` thành công
+- `prisma generate` thành công (sau khi stop PM2)
+- `npm run build` thành công — /job-title-catalog có trong build output
+- `pm2 restart lms-web && pm2 restart lms-worker` → cả hai online
+
+**Lưu ý / Rủi ro:**
+- `--accept-data-loss` dùng vì thêm @@unique trên CompetencyFramework.code và LearningPath.code (tất cả đang NULL nên không mất dữ liệu thực sự)
+- lms-worker phải stop trước khi `prisma generate` do EPERM rename DLL
+
+## [2026-07-01 14:00] Feat: Job Title Catalog — danh mục chức danh chuẩn hóa per-company
+
+**Loại:** feature
+
+**Các thay đổi:**
+- Tạo mới `src/services/job-title-catalog.service.ts`: CRUD functions `getCatalogs`, `createCatalogEntry`, `updateCatalogEntry`, `deleteCatalogEntry` với guard trùng mã và guard xóa khi có vị trí liên kết
+- Tạo mới `src/app/api/job-title-catalog/route.ts`: GET (list, lọc theo search/category/level/isActive) + POST (tạo mới) — phân quyền group_admin/company_admin/hr_manager
+- Tạo mới `src/app/api/job-title-catalog/[id]/route.ts`: PATCH (cập nhật) + DELETE (xóa, guard CATALOG_IN_USE)
+- Tạo mới `src/app/(dashboard)/job-title-catalog/page.tsx`: trang CRUD đầy đủ — bảng danh mục, filter, modal tạo/sửa, modal xác nhận xóa, toggle trạng thái, badge cấp bậc màu
+- Cập nhật `src/app/(dashboard)/positions/page.tsx`: thêm SWR fetch catalog, combobox "Chức danh từ danh mục" trong modal (tự điền title/code/level), badge ✓ DM / Tùy chỉnh trong bảng, dùng useToast thay cho alert
+- Cập nhật `src/services/position.service.ts`: thêm `catalogId`, `impliedRole` vào createPosition/updatePosition, include `catalog` trong getPositions
+- Cập nhật `src/app/api/positions/route.ts` và `[id]/route.ts`: truyền `catalogId`, `impliedRole` qua body
+
+**Kết quả:**
+- Build thành công (✓ Compiled successfully)
+- `/job-title-catalog` static page, `/api/job-title-catalog` và `/api/job-title-catalog/[id]` dynamic routes đã xuất hiện trong build output
+- `pm2 restart lms-web` — status: online
+
+**Lưu ý / Rủi ro:**
+- Prisma schema đã có sẵn `JobTitleCatalog` model và FK `catalogId` trên `JobPosition` — không cần migration thêm
+- Catalog dùng `companyId` từ Organization (vì schema FK trỏ Organization), đảm bảo tenant isolation
+- Xóa catalog bị block nếu có vị trí liên kết (lỗi CATALOG_IN_USE)
+
+## [2026-07-01 11:30] Feat: Notifications system + Course ratings + Learning group UX + Instructor access
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `prisma/schema.prisma` — Thêm model `Notification` (companyId, targetType, targetId, title, body) và `NotificationRead`; thêm quan hệ vào `User` model
+- `prisma db push` + `prisma generate` — đã cập nhật DB và Prisma client
+
+**Notifications:**
+- `src/app/api/notifications/route.ts` — GET (inbox theo companyId/dept/user/all) + POST (create, admin/group_admin)
+- `src/app/api/notifications/[id]/read/route.ts` — POST đánh dấu đã đọc (upsert)
+- `src/app/(dashboard)/notifications/page.tsx` — Trang inbox + compose: learner xem thông báo, admin gửi cho toàn công ty/phòng ban/cá nhân, group_admin chọn công ty đích
+- `components/web/web-shell.tsx` — Bell button thực: hiển thị số unread, poll 60s, link sang /notifications; thêm mục Thông báo vào nav tất cả roles; instructor nav thêm Lộ trình học; set document.title từ company.name
+
+**Course ratings detail:**
+- `src/app/api/courses/[id]/ratings/route.ts` — GET trả ratings cá nhân kèm comment, tổng hợp avg + phân phối 1-5 sao
+- `src/app/(dashboard)/courses/[id]/page.tsx` — Tab mới "⭐ Đánh giá": hiển thị avg, biểu đồ sao, danh sách từng đánh giá kèm comment
+
+**Learning groups:**
+- `src/components/learning-group/rule-builder.tsx` — Thay UUID text input cho `department_id`/`company_id` thành dropdown từ API; redesign với design tokens
+- `src/app/(dashboard)/learning-groups/[id]/page.tsx` — Full redesign design tokens, toast thay alert/confirm, inline delete confirm
+
+**Instructor access:**
+- `src/app/api/learning-paths/[id]/enroll/route.ts` — Thêm `instructor` vào allowed roles
+
+**Kết quả:**
+- Build thành công, `pm2 start lms-web lms-worker` — cả hai online
+
+**Lưu ý / Rủi ro:**
+- Notification poll 60s/lần — cân nhắc WebSocket nếu cần real-time
+- group_admin gửi thông báo với companyId=null = broadcast toàn tập đoàn (tất cả user thấy)
+
+## [2026-07-01 10:00] Fix: Functional issues — roles, enrollment, assignment history
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/(dashboard)/users/[id]/page.tsx` — Xóa `group_admin` và `group_hrm` khỏi `ROLE_TYPES`; hai role này là cấp tập đoàn, không được gán ở màn quản lý người dùng công ty
+- `src/app/(dashboard)/learning-paths/[id]/page.tsx` — Viết lại toàn bộ: thay UUID input bằng modal chọn học viên/phòng ban/toàn công ty có tìm kiếm; thay `alert()` → toast, `confirm()` → inline confirm state; áp dụng design tokens
+- `src/app/api/learning-paths/[id]/enroll/route.ts` — Cập nhật API hỗ trợ `targetType: 'user'|'department'|'company'`; bulk enrollment cho dept/company tự động bỏ qua học viên đã đăng ký
+- `src/app/api/courses/[id]/assign/route.ts` — Thêm GET handler trả về lịch sử giao khóa học (50 bản ghi gần nhất, kèm tên người dùng/phòng ban)
+- `src/app/(dashboard)/courses/[id]/page.tsx` — Thêm state `assignHistory`, load lịch sử khi mở tab Phân phối, hiển thị bảng lịch sử giao học bên dưới form giao
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` — status online
+- Enrollment modal có 3 tab: Học viên (search list), Phòng ban (dropdown), Toàn công ty (confirm)
+- Tab phân phối khóa học hiển thị lịch sử với loại target, người giao, ngày, hạn, bắt buộc
+
+**Lưu ý / Rủi ro:**
+- Bulk enrollment (dept/company) gọi `enrollUserToPath` lần lượt từng user — với công ty lớn có thể chậm; cân nhắc batch job nếu cần
+
+## [2026-07-01 11:00] PHASE 5 — Learner Views Redesign (Clean Professional)
+
+**Loại:** refactor
+
+**Các thay đổi:**
+- `src/app/(dashboard)/my-courses/page.tsx` — card grid: thumbnail `from-muted to-primary-tint`; progress bar `bg-primary`; mandatory badge `bg-warning-tint text-warning`; done badge `bg-success`; action buttons design tokens
+- `src/app/(dashboard)/my-courses/[id]/page.tsx` — breadcrumb `text-subtle`; progress card `bg-surface shadow-card`; section cards `shadow-card`; lesson items `divide-default`; done checkmark `text-success`; progress bar `bg-primary`
+- `src/app/(dashboard)/my-courses/[id]/lessons/[lessonId]/page.tsx` — quiz card `shadow-card`; quiz start `bg-primary`; submit `bg-success`; result `text-success/text-danger`; completed bar `bg-success-tint border-success/20`; rating modal `bg-surface border border-default shadow-card`; stars keep yellow-400; nav buttons design tokens
+- `src/app/(dashboard)/my-learning-paths/page.tsx` — status badges: COMPLETED `bg-success-tint`, OVERDUE `bg-danger-tint`, default `bg-primary-tint`; step circles design tokens; stepType badges: REQUIRED `bg-primary-tint`, ELECTIVE `bg-success-tint`, ADVANCED `bg-muted`; progress bar `bg-success/bg-primary`; `text-muted-foreground` → `text-subtle/text-faint`
+
+**Kết quả:**
+- Build thành công (✓ Compiled successfully)
+- pm2 restart lms-web → online
+
+**Lưu ý / Rủi ro:**
+- Rating stars giữ `text-yellow-400` (màu sao tiêu chuẩn, không có trong design token)
+
+## [2026-07-01 10:00] PHASE 4 — Courses Redesign (Clean Professional)
+
+**Loại:** refactor
+
+**Các thay đổi:**
+- `src/app/(dashboard)/courses/page.tsx` — đã viết ở cuối Phase 3, danh sách khóa học với table design tokens
+- `src/app/(dashboard)/courses/[id]/page.tsx` — redesign toàn bộ: tabs, inline edit, thumbnail, publish, assign, share tab
+- `src/app/(dashboard)/courses/[id]/lessons/[lessonId]/content/page.tsx` — STATUS_BADGE dùng design tokens (warning/primary/success/danger); LMS Picker từ purple → primary tokens; upload progress bar dùng bg-primary
+- `src/app/(dashboard)/courses/[id]/lessons/[lessonId]/quiz/page.tsx` — quiz config: bank selection bg-primary-tint/border-primary/40; difficulty label colors dùng text-success/text-warning/text-danger
+- `src/app/(dashboard)/courses/wizard/page.tsx` — stepper bg-success/bg-primary/bg-muted; FIX: `alert()` → `toast('error', ...)` per CLAUDE.md rule; text-muted-foreground → text-subtle
+
+**Kết quả:**
+- Build thành công (✓ Compiled successfully)
+- pm2 restart lms-web → online
+- Tất cả hardcoded colors (blue-*, green-*, red-*, gray-*, purple-*, amber-*, yellow-*) đã được thay bằng design tokens
+
+**Lưu ý / Rủi ro:**
+- `alert()` trong wizard/page.tsx đã được replace bằng toast — đây là breaking behavior fix theo CLAUDE.md rule 5
+
+## [2026-07-01 02:00] PHASE 3 — User & Organization Management Redesign
+
+**Loại:** refactor
+
+**Các thay đổi:**
+- `src/app/(dashboard)/users/page.tsx` — thay toàn bộ hardcoded Tailwind colors (blue-600, green-100, gray-*) bằng design tokens; table pattern chuẩn; modal với primary-tint org section; email validation dùng border-danger/border-success
+- `src/app/(dashboard)/users/[id]/page.tsx` — avatar dùng bg-primary; toggle button dùng border-danger/border-success; password change button bg-primary; role badges bg-primary-tint; card + table design tokens
+- `src/app/(dashboard)/organizations/page.tsx` — company cards bg-surface border-default shadow-card; icon bg-primary-tint text-primary; active badges success tokens; modals design tokens; admin step modal bg-primary-tint
+- `src/app/(dashboard)/organizations/[id]/page.tsx` — breadcrumb text-primary; header card; tabs border-primary; info tab grid; users tab table; create admin section bg-warning-tint; assign role modal
+- `src/app/(dashboard)/import/page.tsx` — type tabs border-primary; step indicator bg-primary-tint/bg-success-tint; upload zone bg-primary-tint; file input design tokens; validate stats text-success/text-danger; done step CheckCircle icon; history table
+
+**Kết quả:**
+- Build thành công, pm2 restart lms-web → online
+
+**Lưu ý / Rủi ro:**
+- Không thay đổi business logic, API calls, TypeScript types
+
+## [2026-07-01 01:00] PHASE 2 — Dashboard & Core Pages Redesign
+
+**Loại:** feature / refactor
+
+**Các thay đổi:**
+- `dashboard/page.tsx` — stat cards dùng text-[20px] font-medium; greeting banner bg-primary; bảng company/course dùng table pattern mới; quick nav dùng card + icon; xóa p-6 wrapper (WebShell cung cấp padding)
+- `profile/page.tsx` — avatar bg-primary; role badges bg-primary-tint; card pattern mới; form input pattern chuẩn; button bg-primary
+- `settings/page.tsx` — tab switcher dạng pill (bg-primary khi active); tất cả card bg-surface border-default; form inputs chuẩn; giữ inline style cho dynamic (gradient, bg image, preview button)
+- `ai-config/page.tsx` — status legend dùng semantic tokens (success/danger/warning/faint); empty state dùng EmptyState pattern; info box bg-primary-tint; modal shadow-card
+- `operations/page.tsx` — StatCard redesign (text-[20px] font-medium); MemBar dùng bg-danger/warning/primary thay vì red/amber/blue; company table token hoàn toàn; status badge bg-success-tint text-success
+
+**Pattern áp dụng nhất quán:**
+- Xóa `p-6 max-w-* mx-auto` ngoài cùng → chỉ giữ `max-w-* mx-auto space-y-4`
+- Tables: card wrapper + thead text-[10px] text-faint + tbody hover:bg-muted
+- Progress bars: giữ `style={{ width: '${pct}%' }}` (dynamic), đổi track bg-gray-200 → bg-muted
+
+**Kết quả:**
+- Build thành công, pm2 online
+- 5/5 trang Phase 2 hoàn thành
+
+## [2026-07-01 00:30] PHASE 1 — Auth Pages Redesign
+
+**Loại:** feature / refactor
+
+**Các thay đổi:**
+- `src/app/(auth)/login/page.tsx` — redesign: card max-w-sm, logo icon Building2, show/hide password, dynamic background giữ nguyên (style={bgStyle}), button dùng bg-primary thay inline style
+- `src/app/(auth)/forgot-password/page.tsx` — redesign: cùng card pattern, success state dùng bg-success-tint + Check icon
+- `src/app/(auth)/reset-password/page.tsx` — redesign: spinner loading thay text, fieldClass helper, success state chuẩn
+- `src/app/(auth)/change-password/page.tsx` — redesign: loại bỏ Button/Input/Label từ shadcn, dùng raw HTML với design tokens
+
+**Pattern thống nhất trên 4 trang:**
+- Container: `min-h-screen flex items-center justify-center bg-muted`
+- Card: `bg-surface rounded-xl border border-default shadow-card p-6 max-w-sm`
+- Logo: icon Building2 trong `w-10 h-10 rounded-xl bg-primary`
+- Input: `border border-default rounded-lg text-[12px] focus:border-primary focus:ring-2 focus:ring-primary/20`
+- Button: `bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg py-2.5`
+- Error: `bg-danger-tint text-danger rounded-lg`
+- Success: `bg-success-tint` + Check icon từ lucide-react
+
+**Kết quả:**
+- Build thành công, pm2 online
+- Các inline style chỉ còn lại ở `login/page.tsx` cho dynamic background (loginBgUrl/loginBgColor từ API)
+
+**Lưu ý / Rủi ro:**
+- Đã loại bỏ shadcn Button/Input/Label khỏi auth pages để full control styling
+- `change-password` dùng useAuth() — cần AuthProvider (đã có trong (auth)/layout.tsx)
+
+## [2026-07-01 00:00] PHASE 0 — Web Shell & Design System Foundation
+
+**Loại:** feature / refactor
+
+**Các thay đổi:**
+- `tailwind.config.ts` — thay `muted.DEFAULT` từ HSL sang `#F1EFE8` (warm beige); thêm `border.default: 'rgba(0,0,0,0.08)'`
+- `src/app/globals.css` — thêm `@layer utilities`: `.scrollbar-none`, `.border-default`, `.divide-default`
+- `components/web/web-shell.tsx` — viết lại hoàn toàn: sidebar w-52 trắng + header xanh #185FA5; role-based nav (NAV_BY_ROLE cho 5 roles); tích hợp useAuth thực tế; company branding fetch; auth redirect; UserMenu với logout thật
+- `src/app/(dashboard)/layout.tsx` — đơn giản hoá: chỉ còn AuthProvider + ToastProvider + WebShell
+- `components/web/status-badge.tsx` — NEW: badge semantic (published/draft/progress/warning/danger)
+- `components/web/page-header.tsx` — NEW: header trang với title + description + action slot
+- `components/web/data-table.tsx` — NEW: table tái sử dụng với loading skeleton và empty state
+- `components/web/empty-state.tsx` — NEW: empty state chuẩn với icon + title + action
+- `components/web/skeleton.tsx` — NEW: Skeleton, SkeletonCard, SkeletonTable, SkeletonStatCards, SkeletonForm
+
+**Kết quả:**
+- Build thành công (Next.js 14, 0 lỗi)
+- `pm2 restart lms-web` → status: online
+- Toàn bộ dashboard giờ dùng WebShell mới (sidebar + header xanh)
+
+**Lưu ý / Rủi ro:**
+- `bg-muted` đổi từ Tailwind default gray sang `#F1EFE8` — shadcn components dùng `bg-muted` sẽ ra màu warm beige (chủ ý, phù hợp design mới)
+- `border-default` cần `border` class đi kèm để có `border-width: 1px`
+- WebShell import auth-provider bằng relative path (`../../src/components/providers/auth-provider`) vì components/ ở root ngoài src/
+
+
+## [2026-06-30 16:00] Fix tiến độ khóa học không đồng nhất giữa web và app
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/enrollment.service.ts`: Sửa SQL tính `progressPercent` trong `fetchMyCourses`:
+  1. Nếu `completedAt IS NOT NULL` → trả về 100 (đã hoàn thành luôn = 100%)
+  2. Nếu chưa hoàn thành: tính theo bài `isRequired = true` để đồng nhất với `checkCourseCompletion` (vốn chỉ kiểm tra bài bắt buộc); fallback về tất cả bài nếu không có bài bắt buộc
+
+**Nguyên nhân gốc rễ:**
+- `checkCourseCompletion` chỉ đếm bài `isRequired = true` → 19/19 bắt buộc xong → `completedAt` được set
+- SQL `progressPercent` chia cho TỔNG bài (kể cả optional) → 19/20 = 95%
+- Frontend hiển thị "Hoàn thành" (dựa vào `completedAt`) nhưng thanh tiến độ vẫn hiện 95%
+
+**Kết quả:**
+- User đã hoàn thành khóa học luôn thấy 100% trên cả web lẫn app
+- Tiến độ đang học tính đúng trên bài bắt buộc
+- `npm run build` thành công, `pm2 restart lms-web` — status online
+
+**Lưu ý / Rủi ro:**
+- Không thay đổi logic hoàn thành, chỉ thay đổi cách hiển thị %
+
+## [2026-06-30 15:30] Fix thư viện tài liệu đếm sai + trang vận hành hệ thống lỗi
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/media-library.service.ts`: Thêm `processingStatus: 'READY'` vào query `groupBy` đếm asset trong cây thư mục — trước đây đếm cả PENDING/FAILED nên số hiển thị ở panel sai
+- `src/app/api/admin/operations/route.ts`: Sửa `status: 'completed'` → `completedAt: { not: null }` (2 chỗ: tổng ghi danh hoàn thành + theo từng công ty) — `Enrollment` model không có field `status`, dùng `completedAt` để xác định hoàn thành
+
+**Kết quả:**
+- Panel thư viện tài liệu hiển thị đúng số tài liệu READY (5 thay vì 12)
+- Trang "Vận hành hệ thống" của group_admin không còn báo lỗi
+- `npm run build` thành công, `pm2 restart lms-web` — status online
+
+**Lưu ý / Rủi ro:**
+- Redis cache cho cây thư mục (TTL 5 phút) sẽ tự làm mới sau tối đa 5 phút
+
+## [2026-06-30 15:00] Fix popup đánh giá khóa học bị cắt trên mobile
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/(pwa)/app/courses/[courseId]/lessons/[lessonId]/page.tsx`: Tăng `pb-4` → `pb-20` trên overlay để tránh chồng lên bottom navigation bar; thêm `max-h-[75vh] overflow-y-auto` lên card để popup có thể scroll nếu nội dung quá cao
+
+**Kết quả:**
+- Các nút "Bỏ qua" và "Gửi đánh giá" hiển thị đầy đủ phía trên bottom nav
+- `npm run build` thành công, `pm2 restart lms-web` — status online
+
+**Lưu ý / Rủi ro:**
+- Không ảnh hưởng desktop, chỉ fix layout PWA mobile
+
+## [2026-06-30 01:00] Fix 5 vấn đề UI/API — Profile, Dashboard, Courses, MediaLibrary, CourseShare
+
+**Loại:** fix + feature
+
+**Các thay đổi:**
+- `src/app/api/my/profile/route.ts`: Bỏ `companyId` khỏi query Enrollment (model không có field này → lỗi "Unknown argument companyId" → profile trống)
+- `src/app/(dashboard)/dashboard/page.tsx`: Xóa dòng hiển thị role + companyId bên dưới "Xin chào user"
+- `src/app/(dashboard)/courses/page.tsx`: Cập nhật interface Course theo schema thực (isPublished thay status, bỏ level không có trong DB); thêm cột "Học viên"; hiển thị badge "Được chia sẻ"
+- `src/app/(dashboard)/media-library/page.tsx`: Thêm `status=READY` vào params fetch asset — chỉ hiện tài liệu đã xử lý xong
+- `src/app/api/courses/[id]/publish/route.ts`: Tạo mới — POST chia sẻ khóa học với công ty (group_admin only)
+- `src/app/api/courses/[id]/publications/route.ts`: Tạo mới — GET danh sách chia sẻ, DELETE thu hồi
+
+**Kết quả:**
+- Build thành công, pm2 restart lms-web → online
+- Profile app hiển thị đúng thông tin học viên
+- Dashboard chỉ hiện "Chào mừng bạn trở lại" thay vì roles kỹ thuật
+- Trang Khóa học hiển thị đúng Trạng thái (Đã xuất bản/Bản nháp) và Giờ học
+- Thư viện tài liệu chỉ hiện READY assets
+- Tab "🔗 Chia sẻ với công ty" trên trang khóa học hoạt động (chỉ group_admin thấy)
+
+**Lưu ý / Rủi ro:**
+- Tính năng chia sẻ khóa học đã có sẵn UI trên `/courses/[id]` (tab "Chia sẻ với công ty"), chỉ thiếu API — nay đã có
+
+## [2026-06-30 00:30] Fix: upload 3 video đồng thời thất bại — execSync block event loop
+
+**Loại:** fix
+
+**Nguyên nhân gốc rễ:**
+- `execSync('ffmpeg ...')` block Node.js event loop trong suốt thời gian encode (vài phút)
+- BullMQ cần event loop chạy để gia hạn Redis lock mỗi 15s → không thể gia hạn → lock expire sau 30s
+- BullMQ coi job là "stale" → re-queue → retry chạy song song với attempt gốc
+- Attempt gốc hoàn thành: upload xong → **xóa file temp trên MinIO** → retry bắt đầu → `fGetObject` → "Not Found"
+- Hậu quả: 3 video upload đồng thời đều FAILED với lỗi "Not Found" sau 3 lần retry
+
+**Các thay đổi:**
+- `src/jobs/asset-processor.job.ts`: Thay toàn bộ `execSync` bằng helper `runFFmpeg()` và `runFFprobe()` dùng `spawn` (Promise-based, async) — event loop tự do → BullMQ gia hạn lock bình thường
+- `src/jobs/asset-processor.job.ts`: Thêm `lockDuration: 5 * 60 * 1000` (5 phút) vào Worker options làm safety buffer
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-worker` → online
+- Event loop không còn bị block → BullMQ gia hạn lock mỗi 2.5 phút trong suốt quá trình encode
+- Upload 3 video đồng thời không còn "Missing lock" / "Not Found"
+
+**Lưu ý / Rủi ro:**
+- `spawn` không dùng shell, args truyền dạng array — an toàn hơn `execSync` với shell string
+
+## [2026-06-30 00:00] Tối ưu hóa FFmpeg — chống treo server khi upload video lớn
+
+**Loại:** fix + config
+
+**Các thay đổi:**
+- `src/jobs/asset-processor.job.ts`: Thêm `-preset fast -crf 23 -threads 3 -vf "scale=-2:'min(1080,ih)'" -max_muxing_queue_size 9999 -b:a 128k` vào FFmpeg command; thêm `cleanupOrphanTempDirs()` dọn rác temp khi worker khởi động; thêm `limiter: { max: 4, duration: 60_000 }` vào Worker để chống burst
+- `ecosystem.config.js`: Tăng `max_memory_restart` từ `512M` lên `2G`; thêm `kill_timeout: 30000` để graceful shutdown
+- `src/services/asset.service.ts`: Thêm job priority theo file size (`priorityBySize = ceil(bytes / 1MB)`) — file nhỏ xử lý trước file lớn
+
+**Kết quả:**
+- Build thành công
+- `pm2 restart lms-worker --update-env` → online
+- `pm2 restart lms-web --update-env` → online
+- FFmpeg tối đa 3 cores/job × 2 job = 6 cores, còn 2 cores cho web + DB
+- CPU từ ~100% xuống ~40-50% khi encode video 200MB 1080p
+
+**Lưu ý / Rủi ro:**
+- `-preset fast` giảm ~60% CPU so với `medium`, chất lượng training video không ảnh hưởng đáng kể
+- `scale=-2:'min(1080,ih)'` tự động giảm 4K về 1080p; không ảnh hưởng video đã ≤1080p
+- Rate limiter chỉ giới hạn số job START mới, không ảnh hưởng job đang chạy
+- Worker memory 2GB đủ cho 2 FFmpeg chạy song song trên video ~200MB (~400-800MB tổng)
+
+## [2026-06-30 20:00] feat: Chọn tài liệu từ thư viện LMS khi upload nội dung bài học
+
+**Loại:** feature + migration
+
+**Các thay đổi:**
+- `prisma/schema.prisma` — Thêm model `LessonAsset` (junction table many-to-many giữa Lesson và ContentAsset). Thêm relations `linkedAssets` trên Lesson và `lessonLinks` trên ContentAsset.
+- `src/services/asset.service.ts` — Thêm `linkAssetToLesson()`, `unlinkAssetFromLesson()`. Cập nhật `confirmUpload()` tự tạo junction record. Cập nhật `getAssets()` hỗ trợ filter `q` (text search), `status`, và lessonId qua junction table. 
+- `src/app/api/assets/route.ts` — Parse thêm params `q` và `status`.
+- `src/app/api/lessons/[lessonId]/assets/route.ts` — Route POST mới: gắn asset vào lesson.
+- `src/app/api/lessons/[lessonId]/assets/[assetId]/route.ts` — Route DELETE mới: gỡ asset khỏi lesson (không xóa ContentAsset/MinIO).
+- `src/app/(dashboard)/courses/[id]/lessons/[lessonId]/content/page.tsx` — Thêm nút "📚 Chọn từ thư viện LMS", modal picker (search + type filter, hiển thị assets READY của phòng ban), nút "Gỡ" (unlink) thay cho "Xóa".
+
+**Data migration:**
+- Chạy SQL: INSERT INTO lesson_assets từ các ContentAsset có lessonId != null → backfill junction table.
+
+**Nguyên tắc bảo vệ tài sản:**
+- Khi xóa lesson/course → junction record bị cascade-delete, ContentAsset và MinIO file KHÔNG bị xóa.
+- Nút "Gỡ" chỉ gọi unlink API, không soft-delete ContentAsset.
+- Tài liệu đã upload luôn tồn tại trong thư viện LMS.
+
+**Kết quả:**
+- Build thành công. `pm2 start lms-web lms-worker` → cả hai online.
+- Giảng viên có thể chọn asset READY từ phòng ban mình để gắn vào bài học mà không cần upload lại.
+
+**Lưu ý / Rủi ro:**
+- `organizationId` được lấy từ `user.organizationId` (JWT field trực tiếp) thay vì parse từ roles array — đảm bảo nhất quán với AuthUser type.
+- Picker chỉ hiển thị READY assets của `user.organizationId` — không cross-dept.
+
+## [2026-06-30 18:30] fix + feat: Upload video đáng tin cậy hơn + Course readiness guard
+
+**Loại:** fix + feature
+
+**Các thay đổi:**
+- `src/app/api/assets/upload/route.ts` — Rewrite: không dùng FormData/buffer, stream thẳng request body → MinIO via `Readable.fromWeb()`. Giảm RAM usage, hỗ trợ video lớn tới 3GB.
+- `src/jobs/asset-processor.job.ts` — Fix: dùng `extFromMime(mimeType)` thay vì `path.extname(tempObjectName)` (fix bug tất cả file đều bị đặt ext `.pdf`). Capture FFmpeg stderr để log lỗi rõ ràng. BullMQ retry 3 lần với exponential backoff 15s. Temp file chỉ xóa khi thành công.
+- `src/services/asset.service.ts` — Thêm `bypassPolicy` param vào `handleDownload`, thêm cache invalidation sau `confirmUpload`, thêm `getFolderAssetsForDownload`.
+- `src/services/course.service.ts` — Thêm `getCourseReadiness()` và publish guard: chặn xuất bản nếu còn bài đang xử lý hoặc chưa có nội dung.
+- `src/app/api/courses/[id]/readiness/route.ts` — Endpoint GET mới trả về trạng thái sẵn sàng của tất cả bài học.
+- `src/app/(dashboard)/courses/[id]/lessons/[lessonId]/content/page.tsx` — Upload raw binary XHR thay FormData; polling 5s cho PENDING/PROCESSING assets; badge trạng thái; retry cho FAILED.
+- `src/app/(dashboard)/courses/[id]/page.tsx` — Thêm readiness badges (✓/⏳/✗) bên cạnh mỗi bài học; readiness summary bar trong tab Nội dung; warning panel trên nút Xuất bản.
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Upload video lớn không còn crash Node.js do hết heap
+- Lỗi FFmpeg hiển thị đầy đủ trong log worker
+- Course editor hiển thị badge trạng thái tài nguyên cho từng bài học
+- Publish API chặn nếu có bài chưa sẵn sàng, trả về thông báo cụ thể
+
+**Lưu ý / Rủi ro:**
+- Client upload phải gửi header `X-File-Type` và `Content-Length` (raw body, không phải FormData)
+- BullMQ retry: temp file trong `lms-temp` bucket sẽ tồn tại trong lúc retry. Sẽ bị xóa tự động khi job thành công hoặc hết retry.
+
+## [2026-06-30 15:00] feat: Thư viện tài liệu (Media Library)
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/services/asset.service.ts` — thêm param `bypassPolicy: boolean` vào `handleDownload` để admin bypass BLOCKED/WATERMARK_ONLY; thêm `getFolderAssetsForDownload` lấy tất cả assets không phải video theo cây org; thêm cache invalidation `mediaLibTree:companyId:*` khi upload file mới
+- `src/app/api/assets/[id]/download/route.ts` — tính `isPrivileged` từ roles (company_admin, hr_manager, group_admin, group_hrm), truyền vào handleDownload để bypass policy khi tải file đơn lẻ
+- `src/services/media-library.service.ts` *(mới)* — `getMediaLibraryTree` build cây thư mục từ org tree + asset counts, cache 5 phút; `getFolderDownloadPermission`/`setFolderDownloadPermission` quản lý quyền tải thư mục (lưu trong Organization.metadata.allowFolderDownload)
+- `src/app/api/media-library/tree/route.ts` *(mới)* — GET /api/media-library/tree, roles: company_admin, hr_manager, instructor, group_admin, group_hrm
+- `src/app/api/media-library/folder-download-permission/route.ts` *(mới)* — GET kiểm tra quyền tải thư mục; PUT (group_admin only) set/revoke quyền per công ty
+- `src/app/api/media-library/download-folder/route.ts` *(mới)* — POST tạo ZIP toàn bộ tài liệu của org subtree (không bao gồm video), trả về binary stream; kiểm tra permission từ group_admin trước khi cho phép company_admin download
+- `src/app/(dashboard)/media-library/page.tsx` *(mới)* — UI 2-panel: cây thư mục trái (64) + lưới tài liệu phải; hỗ trợ xem trước (modal), tải về từng file, tải thư mục (ZIP), upload modal 2 bước
+- `src/app/(dashboard)/layout.tsx` — thêm nav item "Thư viện tài liệu" sau "Khóa học"
+
+**Kết quả:**
+- Build thành công, không có lỗi TypeScript
+- `pm2 restart lms-web` → status: online
+- Trang `/media-library` accessible tại kích thước 7.62 kB
+
+**Logic phân quyền tải thư mục:**
+- `group_admin` / `group_hrm` → luôn được tải thư mục
+- `company_admin` / `hr_manager` → chỉ được tải khi `Organization.metadata.allowFolderDownload === true` (do group_admin cấp qua ⚙ icon trên folder tree hoặc PUT API)
+- `instructor` → không có nút tải thư mục (chỉ xem và tải từng file theo policy)
+- ZIP chỉ bao gồm document/presentation/audio/image (skip video — quá lớn)
+- Giới hạn 200 files/lần tải
+
+**Lưu ý / Rủi ro:**
+- Tạo ZIP đồng bộ trong memory — với folder lớn (>50 files lớn) có thể slow; nên cân nhắc async job (BullMQ) cho production với nhiều tài liệu
+- Permission được lưu trong `Organization.metadata` JSON — không cần migration schema
+
 ## [2026-06-29 18:00] Fix chống gian lận video lần 2 — redesign hoàn toàn
 
 **Loại:** fix

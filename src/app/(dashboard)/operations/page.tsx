@@ -1,48 +1,38 @@
 'use client';
 
 import { useAuth } from '@/components/providers/auth-provider';
-import { useEffect, useState, useCallback } from 'react';
+import { useToast } from '@/components/ui/toast';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { RefreshCw, Database, Archive, RotateCcw, Play, ChevronDown, AlertTriangle } from 'lucide-react';
 
 interface SystemInfo {
   platform: string;
   nodeVersion: string;
   uptimeSeconds: number;
   memory: {
-    totalMB: number;
-    usedMB: number;
-    freeMB: number;
-    usedPct: number;
-    processMB: number;
-    heapUsedMB: number;
-    heapTotalMB: number;
+    totalMB: number; usedMB: number; freeMB: number; usedPct: number;
+    processMB: number; heapUsedMB: number; heapTotalMB: number;
   };
 }
 
 interface CompanyStat {
-  id: string;
-  name: string;
-  code: string;
-  users: number;
-  onlineNow: number;
-  enrollments: number;
-  completed: number;
+  id: string; name: string; code: string;
+  users: number; onlineNow: number; enrollments: number; completed: number;
 }
 
 interface OperationsData {
   system: SystemInfo;
   online: { total: number; windowMinutes: number };
   stats: {
-    totalUsers: number;
-    activeUsers: number;
-    totalCourses: number;
-    totalEnrollments: number;
-    completedEnrollments: number;
+    totalUsers: number; activeUsers: number; totalCourses: number;
+    totalEnrollments: number; completedEnrollments: number;
   };
   companies: CompanyStat[];
   generatedAt: string;
 }
 
-const REFRESH_INTERVAL = 30; // seconds
+const REFRESH_INTERVAL = 30;
 
 function fmtUptime(sec: number) {
   const d = Math.floor(sec / 86400);
@@ -53,38 +43,166 @@ function fmtUptime(sec: number) {
   return `${m}m`;
 }
 
-function MemBar({ pct, color = 'bg-blue-500' }: { pct: number; color?: string }) {
-  const c = pct > 85 ? 'bg-red-500' : pct > 65 ? 'bg-amber-500' : color;
+function MemBar({ pct, variant = 'primary' }: { pct: number; variant?: 'primary' | 'success' | 'warning' | 'danger' }) {
+  const autoColor = pct > 85 ? 'bg-danger' : pct > 65 ? 'bg-warning' : `bg-${variant}`;
   return (
-    <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
-      <div className={`h-full rounded-full transition-all duration-500 ${c}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+    <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+      <div className={`h-full rounded-full transition-all duration-500 ${autoColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
     </div>
   );
 }
 
-function StatCard({ label, value, sub, color = 'text-gray-900' }: { label: string; value: string | number; sub?: string; color?: string }) {
+function StatCard({ label, value, sub, color = 'text-content' }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
-    <div className="bg-white border rounded-xl p-5 space-y-1">
-      <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">{label}</p>
-      <p className={`text-3xl font-bold ${color}`}>{value.toLocaleString()}</p>
-      {sub && <p className="text-xs text-gray-400">{sub}</p>}
+    <div className="bg-surface border border-default rounded-xl shadow-card p-4 space-y-1">
+      <p className="text-[9px] font-medium text-faint uppercase tracking-widest">{label}</p>
+      <p className={`text-[20px] font-medium leading-none ${color}`}>{typeof value === 'number' ? value.toLocaleString() : value}</p>
+      {sub && <p className="text-[11px] text-faint">{sub}</p>}
     </div>
   );
 }
+
+interface BackupJobRecord {
+  id: string; type: string; status: string; destination: string;
+  objectPrefix: string | null; dbDumpPath: string | null;
+  sizeBytes: string | null; fileCount: number | null;
+  error: string | null; restoreNote: string | null; restoredAt: string | null;
+  startedAt: string; completedAt: string | null;
+  triggeredBy: { fullName: string; email: string };
+}
+
+interface CompanyOption { id: string; name: string; code: string; }
+
+function fmtBytes(bytes: string | null): string {
+  if (!bytes) return '—';
+  const n = Number(bytes);
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)} KB`;
+  return `${n} B`;
+}
+
+const STATUS_STYLE: Record<string, string> = {
+  PENDING:   'bg-muted text-faint',
+  RUNNING:   'bg-primary-tint text-primary animate-pulse',
+  COMPLETED: 'bg-success-tint text-success',
+  FAILED:    'bg-danger-tint text-danger',
+  RESTORING: 'bg-warning-tint text-warning animate-pulse',
+  RESTORED:  'bg-purple-50 text-purple-600',
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  PENDING: 'Chờ', RUNNING: 'Đang chạy', COMPLETED: 'Hoàn thành',
+  FAILED: 'Thất bại', RESTORING: 'Đang phục hồi', RESTORED: 'Đã phục hồi',
+};
 
 export default function OperationsPage() {
-  const { accessToken } = useAuth();
-  const [data, setData] = useState<OperationsData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
+  const { accessToken, user } = useAuth();
+  const { toast } = useToast();
+  const [data,        setData]        = useState<OperationsData | null>(null);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState('');
+  const [countdown,   setCountdown]   = useState(REFRESH_INTERVAL);
   const [lastRefresh, setLastRefresh] = useState('');
+  const [activeTab,   setActiveTab]   = useState<'system' | 'backup'>('system');
+
+  // Backup state
+  const [backupJobs,     setBackupJobs]     = useState<BackupJobRecord[]>([]);
+  const [backupLoading,  setBackupLoading]  = useState(false);
+  const [triggerOpen,    setTriggerOpen]    = useState(false);
+  const [restoreDialog,  setRestoreDialog]  = useState<{
+    jobId: string; type: 'db' | 'assets' | 'full';
+    job: BackupJobRecord; scopeCompanyId: string;
+  } | null>(null);
+  const [companyOpts,    setCompanyOpts]    = useState<CompanyOption[]>([]);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const userRoles: string[] = ((user?.roles ?? []) as Array<{ role: string } | string>).map((r) =>
+    typeof r === 'string' ? r : r.role,
+  );
+  const isGroupAdmin = userRoles.includes('group_admin');
+
+  const fetchBackupJobs = useCallback(async () => {
+    if (!accessToken || !isGroupAdmin) return;
+    setBackupLoading(true);
+    try {
+      const res = await fetch('/api/admin/backup', { headers: { Authorization: `Bearer ${accessToken}` } }).then((r) => r.json());
+      if (res.success) setBackupJobs(res.data ?? []);
+    } catch { /* ignore */ }
+    finally { setBackupLoading(false); }
+  }, [accessToken, isGroupAdmin]);
+
+  useEffect(() => {
+    if (activeTab === 'backup') {
+      fetchBackupJobs();
+      // Load companies for restore scope selector
+      if (companyOpts.length === 0 && accessToken) {
+        fetch('/api/organizations?type=company&limit=100', { headers: { Authorization: `Bearer ${accessToken}` } })
+          .then((r) => r.json())
+          .then((res) => { if (res.success) setCompanyOpts(res.data ?? []); })
+          .catch(() => {});
+      }
+    }
+  }, [activeTab, fetchBackupJobs, accessToken, companies.length]);
+
+  // Auto-poll when any job is RUNNING / RESTORING / PENDING
+  useEffect(() => {
+    const hasActive = backupJobs.some((j) => ['RUNNING', 'RESTORING', 'PENDING'].includes(j.status));
+    if (hasActive && !pollRef.current) {
+      pollRef.current = setInterval(fetchBackupJobs, 3000);
+    } else if (!hasActive && pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    return () => {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    };
+  }, [backupJobs, fetchBackupJobs]);
+
+  const triggerBackup = async (type: 'FULL' | 'DB_ONLY' | 'ASSETS_ONLY') => {
+    setTriggerOpen(false);
+    try {
+      const res = await fetch('/api/admin/backup', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type }),
+      }).then((r) => r.json());
+      if (res.success) {
+        toast('success', 'Backup job đã được thêm vào hàng đợi');
+        setTimeout(fetchBackupJobs, 1500);
+      } else {
+        toast('error', res.error ?? 'Không thể tạo backup');
+      }
+    } catch { toast('error', 'Lỗi kết nối'); }
+  };
+
+  const triggerRestore = async (reason: string) => {
+    if (!restoreDialog) return;
+    const { jobId, type, scopeCompanyId } = restoreDialog;
+    setRestoreDialog(null);
+    try {
+      const res = await fetch(`/api/admin/backup/${jobId}/restore`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          restoreDb: type === 'db' || type === 'full',
+          restoreAssets: type === 'assets' || type === 'full',
+          scopeCompanyId: scopeCompanyId || null,
+          reason,
+        }),
+      }).then((r) => r.json());
+      if (res.success) {
+        toast('info', 'Quá trình khôi phục đã bắt đầu — tự động cập nhật trạng thái');
+        fetchBackupJobs();
+      } else {
+        toast('error', res.error ?? 'Khôi phục thất bại');
+      }
+    } catch { toast('error', 'Lỗi kết nối'); }
+  };
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/operations', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const res = await fetch('/api/admin/operations', { headers: { Authorization: `Bearer ${accessToken}` } });
       const json = await res.json();
       if (json.success) {
         setData(json.data);
@@ -101,16 +219,11 @@ export default function OperationsPage() {
     }
   }, [accessToken]);
 
-  // Initial fetch
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  // Auto-refresh every REFRESH_INTERVAL seconds
   useEffect(() => {
     const interval = setInterval(() => fetchData(), REFRESH_INTERVAL * 1000);
     return () => clearInterval(interval);
   }, [fetchData]);
-
-  // Countdown ticker
   useEffect(() => {
     const tick = setInterval(() => setCountdown((c) => (c > 0 ? c - 1 : REFRESH_INTERVAL)), 1000);
     return () => clearInterval(tick);
@@ -118,18 +231,18 @@ export default function OperationsPage() {
 
   if (loading) {
     return (
-      <div className="p-8 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      <div className="flex items-center justify-center py-16">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-8">
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700">
-          <p className="font-semibold">Lỗi tải dữ liệu</p>
-          <p className="text-sm mt-1">{error}</p>
+      <div className="max-w-6xl mx-auto">
+        <div className="bg-danger-tint border border-danger/20 rounded-xl p-4 text-[12px] text-danger">
+          <p className="font-medium">Lỗi tải dữ liệu</p>
+          <p className="mt-1">{error}</p>
         </div>
       </div>
     );
@@ -139,160 +252,344 @@ export default function OperationsPage() {
 
   const { system, online, stats, companies } = data;
   const maxUsers = Math.max(...companies.map((c) => c.users), 1);
+  const completionPct = stats.totalEnrollments > 0
+    ? Math.round((stats.completedEnrollments / stats.totalEnrollments) * 100)
+    : 0;
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Vận hành hệ thống</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Cập nhật lúc {lastRefresh} · tự làm mới sau {countdown}s</p>
+    <div className="max-w-6xl mx-auto space-y-4">
+
+      {/* ConfirmDialog for restore */}
+      {restoreDialog && (
+        <ConfirmDialog
+          open
+          title={`Xác nhận khôi phục — ${restoreDialog.type === 'db' ? 'Database' : restoreDialog.type === 'assets' ? 'Assets' : 'Toàn bộ'}`}
+          message={
+            <div className="space-y-3">
+              <div className="bg-muted rounded-lg px-3 py-2 text-[11px] space-y-1">
+                <p><span className="text-faint">Backup:</span> <span className="font-medium">{new Date(restoreDialog.job.startedAt).toLocaleString('vi-VN')}</span></p>
+                <p><span className="text-faint">Kích thước:</span> <span className="font-medium">{fmtBytes(restoreDialog.job.sizeBytes)}</span> · {restoreDialog.job.fileCount?.toLocaleString() ?? 0} files</p>
+                <p><span className="text-faint">Đích:</span> <span className="font-medium">{restoreDialog.job.destination}</span></p>
+              </div>
+              {(restoreDialog.type === 'assets' || restoreDialog.type === 'full') && companyOpts.length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-subtle">Phạm vi assets (để trống = toàn bộ)</label>
+                  <select
+                    value={restoreDialog.scopeCompanyId}
+                    onChange={(e) => setRestoreDialog((d) => d ? { ...d, scopeCompanyId: e.target.value } : d)}
+                    className="w-full border border-default rounded-lg px-3 py-2 text-[12px] focus:outline-none focus:border-primary bg-surface"
+                  >
+                    <option value="">Tất cả công ty</option>
+                    {companyOpts.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="flex items-start gap-2 bg-danger-tint rounded-lg px-3 py-2">
+                <AlertTriangle size={13} className="text-danger mt-0.5 shrink-0" />
+                <p className="text-[11px] text-danger">
+                  {restoreDialog.type === 'db' || restoreDialog.type === 'full'
+                    ? 'Toàn bộ database sẽ bị ghi đè. App sẽ ngắt kết nối trong vài giây.'
+                    : `Assets ${restoreDialog.scopeCompanyId ? 'của công ty đã chọn' : 'tất cả công ty'} sẽ bị ghi đè.`}
+                  {' '}Hành động này không thể hoàn tác.
+                </p>
+              </div>
+            </div>
+          }
+          confirmLabel="Bắt đầu khôi phục"
+          variant="danger"
+          inputLabel="Nhập lý do khôi phục (bắt buộc)"
+          inputRequired
+          onConfirm={triggerRestore}
+          onCancel={() => setRestoreDialog(null)}
+        />
+      )}
+
+      {/* Tab switcher */}
+      <div className="flex gap-0.5 bg-surface rounded-xl border border-default shadow-card p-1 max-w-xs">
+        {[
+          { id: 'system', label: 'Hệ thống', icon: Database },
+          ...(isGroupAdmin ? [{ id: 'backup', label: 'Sao lưu', icon: Archive }] : []),
+        ].map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button key={tab.id}
+              onClick={() => setActiveTab(tab.id as 'system' | 'backup')}
+              className={`flex items-center gap-1.5 flex-1 justify-center px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                activeTab === tab.id ? 'bg-primary text-white' : 'text-subtle hover:text-content hover:bg-muted'
+              }`}>
+              <Icon size={13} />{tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── BACKUP TAB ── */}
+      {activeTab === 'backup' && isGroupAdmin && (
+        <div className="space-y-4">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button onClick={fetchBackupJobs} disabled={backupLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-default rounded-lg text-[12px] text-subtle hover:bg-muted transition-colors disabled:opacity-50">
+                <RefreshCw size={13} className={backupLoading ? 'animate-spin' : ''} /> Làm mới
+              </button>
+            </div>
+            {/* Trigger dropdown */}
+            <div className="relative">
+              <button onClick={() => setTriggerOpen((v) => !v)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg transition-colors">
+                <Play size={12} /> Tạo backup <ChevronDown size={12} />
+              </button>
+              {triggerOpen && (
+                <div className="absolute right-0 top-full mt-1 w-44 bg-surface border border-default rounded-xl shadow-lg overflow-hidden z-10">
+                  {[
+                    { type: 'FULL' as const, label: 'Đầy đủ (DB + Assets)' },
+                    { type: 'DB_ONLY' as const, label: 'Chỉ Database' },
+                    { type: 'ASSETS_ONLY' as const, label: 'Chỉ Assets' },
+                  ].map((opt) => (
+                    <button key={opt.type} onClick={() => triggerBackup(opt.type)}
+                      className="w-full text-left px-4 py-2.5 text-[12px] text-content hover:bg-muted transition-colors border-b border-default last:border-0">
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Job list */}
+          {backupLoading && backupJobs.length === 0 ? (
+            <div className="bg-surface border border-default rounded-xl shadow-card p-8 text-center text-[12px] text-faint">Đang tải...</div>
+          ) : backupJobs.length === 0 ? (
+            <div className="bg-surface border border-default rounded-xl shadow-card p-8 text-center text-[12px] text-faint">
+              Chưa có backup nào. Cấu hình đích lưu trữ trong <strong>Cài đặt → Backup Storage</strong> rồi tạo backup đầu tiên.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {backupJobs.map((job) => (
+                <div key={job.id} className="bg-surface border border-default rounded-xl shadow-card overflow-hidden">
+                  <div className="px-4 py-3 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 ${STATUS_STYLE[job.status] ?? 'bg-muted text-faint'}`}>
+                        {STATUS_LABEL[job.status] ?? job.status}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[12px] font-medium text-content">
+                          {job.type === 'FULL' ? 'Full Backup' : job.type === 'DB_ONLY' ? 'Database Only' : 'Assets Only'}
+                          <span className="ml-2 text-[10px] font-normal text-faint">{job.destination}</span>
+                        </p>
+                        <p className="text-[11px] text-faint">
+                          {new Date(job.startedAt).toLocaleString('vi-VN')}
+                          {job.completedAt && ` → ${new Date(job.completedAt).toLocaleTimeString('vi-VN')}`}
+                          {' · '}{job.triggeredBy.fullName}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[13px] font-medium text-content">{fmtBytes(job.sizeBytes)}</p>
+                      {job.fileCount != null && <p className="text-[11px] text-faint">{job.fileCount.toLocaleString()} files</p>}
+                    </div>
+                  </div>
+                  {job.status === 'RESTORING' && (
+                    <div className="px-4 pb-3">
+                      <div className="flex items-center gap-2 bg-warning-tint rounded-lg px-3 py-2">
+                        <div className="w-3 h-3 border-2 border-warning border-t-transparent rounded-full animate-spin shrink-0" />
+                        <p className="text-[11px] text-warning">Đang khôi phục… Tự động cập nhật mỗi 3 giây</p>
+                      </div>
+                    </div>
+                  )}
+                  {job.restoreNote && (job.status === 'RESTORED' || job.status === 'FAILED') && (
+                    <div className="px-4 pb-2">
+                      <p className="text-[11px] text-faint">
+                        <span className="font-medium">Lý do khôi phục:</span> {job.restoreNote}
+                        {job.restoredAt && <span className="ml-2">· {new Date(job.restoredAt).toLocaleString('vi-VN')}</span>}
+                      </p>
+                    </div>
+                  )}
+                  {job.error && (
+                    <div className="px-4 pb-3">
+                      <p className="text-[11px] text-danger bg-danger-tint rounded-lg px-3 py-2">{job.error}</p>
+                    </div>
+                  )}
+                  {job.status === 'COMPLETED' && (
+                    <div className="px-4 pb-3 flex gap-2 flex-wrap border-t border-default pt-3">
+                      {job.dbDumpPath && (
+                        <button onClick={() => setRestoreDialog({ jobId: job.id, type: 'db', job, scopeCompanyId: '' })}
+                          className="flex items-center gap-1.5 px-3 py-1.5 border border-danger/30 text-danger bg-danger-tint rounded-lg text-[11px] font-medium hover:bg-danger hover:text-white transition-colors">
+                          <RotateCcw size={11} /> Khôi phục DB
+                        </button>
+                      )}
+                      {job.type !== 'DB_ONLY' && (
+                        <button onClick={() => setRestoreDialog({ jobId: job.id, type: 'assets', job, scopeCompanyId: '' })}
+                          className="flex items-center gap-1.5 px-3 py-1.5 border border-warning/30 text-warning bg-warning-tint rounded-lg text-[11px] font-medium hover:bg-warning hover:text-white transition-colors">
+                          <RotateCcw size={11} /> Khôi phục Assets
+                        </button>
+                      )}
+                      {job.type === 'FULL' && (
+                        <button onClick={() => setRestoreDialog({ jobId: job.id, type: 'full', job, scopeCompanyId: '' })}
+                          className="flex items-center gap-1.5 px-3 py-1.5 border border-default text-subtle rounded-lg text-[11px] font-medium hover:bg-muted transition-colors">
+                          <RotateCcw size={11} /> Khôi phục toàn bộ
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        <button
-          onClick={fetchData}
-          className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50 flex items-center gap-1.5"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Làm mới
+      )}
+
+      {/* ── SYSTEM TAB ── */}
+      {activeTab === 'system' && <>
+
+      {/* Meta bar */}
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] text-faint">
+          Cập nhật lúc <span className="font-medium text-subtle">{lastRefresh}</span> · tự làm mới sau {countdown}s
+        </p>
+        <button onClick={fetchData}
+          className="flex items-center gap-1.5 px-3 py-1.5 border border-default rounded-lg text-[12px] text-subtle hover:bg-muted transition-colors">
+          <RefreshCw size={13} /> Làm mới
         </button>
       </div>
 
       {/* Key metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatCard
-          label="Đang online"
-          value={online.total}
-          sub={`Trong ${online.windowMinutes} phút qua`}
-          color="text-green-600"
-        />
-        <StatCard label="Người dùng" value={stats.activeUsers} sub={`/ ${stats.totalUsers} tổng`} />
-        <StatCard label="Khóa học" value={stats.totalCourses} />
-        <StatCard label="Ghi danh" value={stats.totalEnrollments} />
-        <StatCard
-          label="Hoàn thành"
-          value={`${stats.totalEnrollments > 0 ? Math.round((stats.completedEnrollments / stats.totalEnrollments) * 100) : 0}%`}
-          sub={`${stats.completedEnrollments.toLocaleString()} khóa`}
-        />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <StatCard label="Đang online"   value={online.total}         sub={`Trong ${online.windowMinutes} phút qua`} color="text-success" />
+        <StatCard label="Người dùng"    value={stats.activeUsers}    sub={`/ ${stats.totalUsers.toLocaleString()} tổng`} />
+        <StatCard label="Khóa học"      value={stats.totalCourses} />
+        <StatCard label="Ghi danh"      value={stats.totalEnrollments} />
+        <StatCard label="Hoàn thành"    value={`${completionPct}%`}  sub={`${stats.completedEnrollments.toLocaleString()} khóa`} />
       </div>
 
-      {/* System resources + server info */}
+      {/* System resources */}
       <div className="grid md:grid-cols-2 gap-4">
         {/* Memory */}
-        <div className="bg-white border rounded-xl p-5 space-y-4">
-          <h2 className="font-semibold text-gray-800">Bộ nhớ hệ thống</h2>
+        <div className="bg-surface border border-default rounded-xl shadow-card p-4 space-y-3">
+          <h2 className="text-[13px] font-medium text-content">Bộ nhớ hệ thống</h2>
           <div className="space-y-3">
             <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600">RAM hệ thống</span>
-                <span className="font-medium">
+              <div className="flex justify-between text-[12px] mb-1.5">
+                <span className="text-subtle">RAM hệ thống</span>
+                <span className="font-medium text-content">
                   {system.memory.usedMB.toLocaleString()} / {system.memory.totalMB.toLocaleString()} MB
-                  <span className="text-gray-400 ml-1">({system.memory.usedPct}%)</span>
+                  <span className="text-faint ml-1">({system.memory.usedPct}%)</span>
                 </span>
               </div>
               <MemBar pct={system.memory.usedPct} />
             </div>
             <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600">Process Node.js (RSS)</span>
-                <span className="font-medium">{system.memory.processMB} MB</span>
+              <div className="flex justify-between text-[12px] mb-1.5">
+                <span className="text-subtle">Process Node.js (RSS)</span>
+                <span className="font-medium text-content">{system.memory.processMB} MB</span>
               </div>
-              <MemBar pct={Math.round((system.memory.processMB / system.memory.totalMB) * 100)} color="bg-purple-500" />
+              <MemBar pct={Math.round((system.memory.processMB / system.memory.totalMB) * 100)} variant="primary" />
             </div>
             <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600">Heap V8</span>
-                <span className="font-medium">{system.memory.heapUsedMB} / {system.memory.heapTotalMB} MB</span>
+              <div className="flex justify-between text-[12px] mb-1.5">
+                <span className="text-subtle">Heap V8</span>
+                <span className="font-medium text-content">
+                  {system.memory.heapUsedMB} / {system.memory.heapTotalMB} MB
+                </span>
               </div>
-              <MemBar
-                pct={Math.round((system.memory.heapUsedMB / Math.max(system.memory.heapTotalMB, 1)) * 100)}
-                color="bg-indigo-500"
-              />
+              <MemBar pct={Math.round((system.memory.heapUsedMB / Math.max(system.memory.heapTotalMB, 1)) * 100)} variant="primary" />
             </div>
           </div>
         </div>
 
         {/* Server info */}
-        <div className="bg-white border rounded-xl p-5 space-y-3">
-          <h2 className="font-semibold text-gray-800">Thông tin server</h2>
-          <dl className="space-y-2 text-sm">
+        <div className="bg-surface border border-default rounded-xl shadow-card p-4 space-y-3">
+          <h2 className="text-[13px] font-medium text-content">Thông tin server</h2>
+          <dl className="space-y-2">
             {[
-              ['Uptime', fmtUptime(system.uptimeSeconds)],
-              ['Node.js', system.nodeVersion],
-              ['Platform', system.platform],
+              ['Uptime',    fmtUptime(system.uptimeSeconds)],
+              ['Node.js',   system.nodeVersion],
+              ['Platform',  system.platform],
               ['RAM trống', `${system.memory.freeMB.toLocaleString()} MB`],
             ].map(([k, v]) => (
-              <div key={k} className="flex justify-between border-b border-gray-50 pb-1.5">
-                <span className="text-gray-500">{k}</span>
-                <span className="font-medium font-mono text-gray-800">{v}</span>
+              <div key={k} className="flex justify-between border-b border-default pb-2 last:border-0">
+                <span className="text-[12px] text-subtle">{k}</span>
+                <span className="text-[12px] font-medium text-content font-mono">{v}</span>
               </div>
             ))}
           </dl>
-
-          <div className="pt-2">
-            <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium
-              ${system.memory.usedPct < 70 ? 'bg-green-100 text-green-700' : system.memory.usedPct < 85 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${system.memory.usedPct < 70 ? 'bg-green-500' : system.memory.usedPct < 85 ? 'bg-amber-500' : 'bg-red-500'}`} />
-              {system.memory.usedPct < 70 ? 'Hệ thống ổn định' : system.memory.usedPct < 85 ? 'RAM đang cao' : 'RAM nguy hiểm — cần xử lý'}
-            </div>
+          <div>
+            {(() => {
+              const pct = system.memory.usedPct;
+              const cls = pct < 70
+                ? 'bg-success-tint text-success'
+                : pct < 85
+                ? 'bg-warning-tint text-warning'
+                : 'bg-danger-tint text-danger';
+              const dot = pct < 70 ? 'bg-success' : pct < 85 ? 'bg-warning' : 'bg-danger';
+              const msg = pct < 70 ? 'Hệ thống ổn định' : pct < 85 ? 'RAM đang cao' : 'RAM nguy hiểm — cần xử lý';
+              return (
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium ${cls}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+                  {msg}
+                </span>
+              );
+            })()}
           </div>
         </div>
       </div>
 
       {/* Company breakdown */}
-      <div className="bg-white border rounded-xl p-5">
-        <h2 className="font-semibold text-gray-800 mb-4">Theo công ty</h2>
+      <div className="bg-surface border border-default rounded-xl shadow-card">
+        <div className="px-4 py-3 border-b border-default">
+          <h2 className="text-[13px] font-medium text-content">Theo công ty</h2>
+        </div>
         {companies.length === 0 ? (
-          <p className="text-sm text-gray-400 text-center py-4">Không có dữ liệu công ty</p>
+          <p className="text-[12px] text-faint text-center py-8">Không có dữ liệu công ty</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b">
-                  <th className="pb-2 font-medium">Công ty</th>
-                  <th className="pb-2 font-medium text-right">Người dùng</th>
-                  <th className="pb-2 font-medium text-center">Đang online</th>
-                  <th className="pb-2 font-medium text-right">Ghi danh</th>
-                  <th className="pb-2 font-medium text-right">Hoàn thành</th>
-                  <th className="pb-2 font-medium w-32">Tỷ lệ hoàn thành</th>
+                <tr className="border-b border-default">
+                  <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Công ty</th>
+                  <th className="text-right text-[10px] text-faint font-medium px-4 py-2.5">Người dùng</th>
+                  <th className="text-center text-[10px] text-faint font-medium px-4 py-2.5">Online</th>
+                  <th className="text-right text-[10px] text-faint font-medium px-4 py-2.5">Ghi danh</th>
+                  <th className="text-right text-[10px] text-faint font-medium px-4 py-2.5">Hoàn thành</th>
+                  <th className="text-[10px] text-faint font-medium px-4 py-2.5 w-32">Tỷ lệ HT</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody>
                 {companies.map((c) => {
-                  const pct = c.enrollments > 0 ? Math.round((c.completed / c.enrollments) * 100) : 0;
+                  const pct      = c.enrollments > 0 ? Math.round((c.completed / c.enrollments) * 100) : 0;
                   const barWidth = Math.round((c.users / maxUsers) * 100);
+                  const rateColor = pct >= 70 ? 'bg-success' : pct >= 40 ? 'bg-primary' : 'bg-danger';
                   return (
-                    <tr key={c.id} className="hover:bg-gray-50">
-                      <td className="py-3 pr-4">
-                        <p className="font-medium text-gray-900">{c.name}</p>
-                        <p className="text-xs text-gray-400 font-mono">{c.code}</p>
-                        <div className="mt-1 h-1 bg-gray-100 rounded-full overflow-hidden w-24">
-                          <div className="h-full bg-blue-400 rounded-full" style={{ width: `${barWidth}%` }} />
+                    <tr key={c.id} className="border-b border-default last:border-0 hover:bg-muted transition-colors">
+                      <td className="px-4 py-3">
+                        <p className="text-[12px] font-medium text-content">{c.name}</p>
+                        <p className="text-[10px] text-faint font-mono">{c.code}</p>
+                        <div className="mt-1.5 h-1 bg-muted rounded-full overflow-hidden w-20">
+                          <div className="h-full bg-primary rounded-full" style={{ width: `${barWidth}%` }} />
                         </div>
                       </td>
-                      <td className="py-3 text-right font-medium">{c.users.toLocaleString()}</td>
-                      <td className="py-3 text-center">
+                      <td className="px-4 py-3 text-[12px] text-content text-right font-medium">{c.users.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-center">
                         {c.onlineNow > 0 ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">
-                            <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-success-tint text-success rounded-full text-[10px] font-medium">
+                            <span className="w-1.5 h-1.5 bg-success rounded-full" />
                             {c.onlineNow}
                           </span>
                         ) : (
-                          <span className="text-gray-300 text-xs">—</span>
+                          <span className="text-faint text-[11px]">—</span>
                         )}
                       </td>
-                      <td className="py-3 text-right">{c.enrollments.toLocaleString()}</td>
-                      <td className="py-3 text-right">{c.completed.toLocaleString()}</td>
-                      <td className="py-3 pl-4">
+                      <td className="px-4 py-3 text-[11px] text-subtle text-right">{c.enrollments.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-[11px] text-subtle text-right">{c.completed.toLocaleString()}</td>
+                      <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-blue-500' : 'bg-gray-400'}`}
-                              style={{ width: `${pct}%` }}
-                            />
+                          <div className="flex-1 bg-muted rounded-full h-1.5 overflow-hidden">
+                            <div className={`h-full rounded-full ${rateColor}`} style={{ width: `${pct}%` }} />
                           </div>
-                          <span className="text-xs text-gray-500 w-8 text-right">{pct}%</span>
+                          <span className="text-[11px] text-subtle w-8 text-right">{pct}%</span>
                         </div>
                       </td>
                     </tr>
@@ -304,10 +601,11 @@ export default function OperationsPage() {
         )}
       </div>
 
-      {/* Footer */}
-      <p className="text-xs text-gray-400 text-center">
+      <p className="text-[11px] text-faint text-center">
         Online users = người dùng có request trong 15 phút qua · dữ liệu DB theo thời gian thực
       </p>
+
+      </>}
     </div>
   );
 }

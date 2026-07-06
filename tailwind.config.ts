@@ -33,7 +33,7 @@ const config: Config = {
           foreground: 'hsl(var(--secondary-foreground))',
         },
         muted: {
-          DEFAULT: 'hsl(var(--muted))',
+          DEFAULT: '#F1EFE8',
           foreground: 'hsl(var(--muted-foreground))',
         },
         accent: {
@@ -71,7 +71,8 @@ const config: Config = {
         muted:    '#F1EFE8',
         border: {
           DEFAULT: 'hsl(var(--border))',
-          subtle: 'rgba(0,0,0,0.08)',
+          subtle:  'rgba(0,0,0,0.08)',
+          default: 'rgba(0,0,0,0.08)',
         },
         // Text
         content: '#111827',   // text-content  — tiêu đề, body

@@ -25,7 +25,8 @@ module.exports = {
       instances: 1,
       exec_mode: 'fork',
       watch: false,
-      max_memory_restart: '512M',
+      max_memory_restart: '2G',  // Tăng từ 512M: 2 FFmpeg đồng thời cần ~400-800MB
+      kill_timeout: 30000,       // Cho graceful shutdown 30s trước khi force-kill
     },
   ],
 };

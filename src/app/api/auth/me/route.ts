@@ -6,6 +6,7 @@ import { getAuthUser } from '@/middleware/auth.middleware';
 import { ValidationError, UnauthorizedError } from '@/lib/errors';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
+import { redisDel } from '@/lib/redis';
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
@@ -19,7 +20,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'Vui lòng nhập mật khẩu hiện tại'),
-  newPassword: z.string().min(8, 'Mật khẩu mới tối thiểu 8 ký tự'),
+  newPassword: z
+    .string()
+    .min(8, 'Mật khẩu mới phải có ít nhất 8 ký tự')
+    .regex(/[A-Z]/, 'Mật khẩu phải có ít nhất 1 chữ hoa')
+    .regex(/[0-9]/, 'Mật khẩu phải có ít nhất 1 chữ số'),
 });
 
 export async function PATCH(req: NextRequest): Promise<NextResponse> {
@@ -42,7 +47,10 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     }
 
     const passwordHash = await bcrypt.hash(parsed.data.newPassword, 10);
-    await prisma.user.update({ where: { id: authUser.id }, data: { passwordHash } });
+    await prisma.user.update({ where: { id: authUser.id }, data: { passwordHash, mustChangePassword: false } });
+
+    // Invalidate refresh token to force re-login with new password
+    await redisDel(`refresh:${authUser.id}`);
 
     return NextResponse.json({ success: true, data: { message: 'Đổi mật khẩu thành công' } });
   } catch (err) {

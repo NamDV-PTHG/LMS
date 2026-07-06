@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 
 interface Option { key: string; text: string }
 
+interface QuestionCategory { id: string; name: string; color?: string | null }
+
 interface QuestionFormData {
   type: 'single_choice' | 'multi_choice' | 'true_false' | 'fill_blank';
   difficulty: 'easy' | 'medium' | 'hard';
@@ -13,6 +15,7 @@ interface QuestionFormData {
   explanation: string;
   tags: string;
   scorePoints: number;
+  categoryId: string;
 }
 
 interface QuestionFormProps {
@@ -20,6 +23,7 @@ interface QuestionFormProps {
   accessToken: string;
   onSaved: () => void;
   onCancel: () => void;
+  categories?: QuestionCategory[];
   initial?: Partial<QuestionFormData & { id: string }>;
 }
 
@@ -43,7 +47,7 @@ const DEFAULT_OPTIONS: Record<string, Option[]> = {
   fill_blank: [{ key: 'A', text: '' }, { key: 'B', text: '' }],
 };
 
-export function QuestionForm({ bankId, accessToken, onSaved, onCancel, initial }: QuestionFormProps) {
+export function QuestionForm({ bankId, accessToken, onSaved, onCancel, categories = [], initial }: QuestionFormProps) {
   const [form, setForm] = useState<QuestionFormData>({
     type: initial?.type ?? 'single_choice',
     difficulty: initial?.difficulty ?? 'medium',
@@ -53,6 +57,7 @@ export function QuestionForm({ bankId, accessToken, onSaved, onCancel, initial }
     explanation: initial?.explanation ?? '',
     tags: initial?.tags ?? '',
     scorePoints: initial?.scorePoints ?? 1,
+    categoryId: initial?.categoryId ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -84,6 +89,7 @@ export function QuestionForm({ bankId, accessToken, onSaved, onCancel, initial }
       body: JSON.stringify({
         ...form,
         tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
+        categoryId: form.categoryId || null,
       }),
     });
     const json = await res.json();
@@ -94,6 +100,8 @@ export function QuestionForm({ bankId, accessToken, onSaved, onCancel, initial }
     }
     setSaving(false);
   };
+
+  const selectedCategory = categories.find((c) => c.id === form.categoryId);
 
   return (
     <div className="space-y-4">
@@ -116,6 +124,31 @@ export function QuestionForm({ bankId, accessToken, onSaved, onCancel, initial }
           </select>
         </div>
       </div>
+
+      {/* Category */}
+      {categories.length > 0 && (
+        <div>
+          <label className="text-xs text-gray-600 block mb-1">Danh mục năng lực</label>
+          <div className="flex gap-2 items-center">
+            <select
+              value={form.categoryId}
+              onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
+              className="flex-1 border rounded px-3 py-2 text-sm"
+            >
+              <option value="">-- Không phân loại --</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            {selectedCategory?.color && (
+              <span
+                className="w-4 h-4 rounded-full flex-shrink-0"
+                style={{ backgroundColor: selectedCategory.color }}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Question text */}
       <div>

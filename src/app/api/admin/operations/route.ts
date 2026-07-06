@@ -58,7 +58,7 @@ export const GET = withRole(['group_admin'], async (_req, { companyId: _cid }) =
       prisma.user.count({ where: { isActive: true } }),
       prisma.course.count(),
       prisma.enrollment.count(),
-      prisma.enrollment.count({ where: { status: 'completed' } }),
+      prisma.enrollment.count({ where: { completedAt: { not: null } } }),
       // Note: Organization.users is the UserRole[] relation (no isActive field on UserRole)
       prisma.organization.findMany({
         where: { type: 'company', isActive: true },
@@ -107,7 +107,7 @@ export const GET = withRole(['group_admin'], async (_req, { companyId: _cid }) =
           }),
           prisma.enrollment.count({
             where: {
-              status: 'completed',
+              completedAt: { not: null },
               user: {
                 isActive: true,
                 roles: {

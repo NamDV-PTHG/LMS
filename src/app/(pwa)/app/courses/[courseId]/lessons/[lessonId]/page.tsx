@@ -472,8 +472,8 @@ export default function LessonPlayerPage() {
 
       {/* ── Modal đánh giá khóa học ── */}
       {showRating && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-4">
-          <div className="w-full max-w-phone bg-surface rounded-2xl shadow-xl overflow-hidden animate-slide-up">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-20">
+          <div className="w-full max-w-phone bg-surface rounded-2xl shadow-xl overflow-y-auto max-h-[75vh] animate-slide-up">
             {ratingSubmitted ? (
               <div className="px-6 py-10 flex flex-col items-center gap-3 text-center">
                 <div className="w-14 h-14 rounded-full bg-success-tint flex items-center justify-center">

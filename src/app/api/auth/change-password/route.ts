@@ -26,7 +26,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       throw new ValidationError('Dữ liệu không hợp lệ', parsed.error.flatten().fieldErrors);
     }
 
-    const user = await prisma.user.findUnique({ where: { id: authUser.sub } });
+    const user = await prisma.user.findUnique({ where: { id: authUser.id } });
     if (!user || !user.isActive) throw new UnauthorizedError('Tài khoản không hợp lệ');
 
     const valid = await bcrypt.compare(parsed.data.currentPassword, user.passwordHash);

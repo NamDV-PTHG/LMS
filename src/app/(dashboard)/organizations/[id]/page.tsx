@@ -4,6 +4,7 @@ import { useAuth } from '@/components/providers/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { ChevronLeft, X } from 'lucide-react';
 
 interface OrgDetail {
   id: string;
@@ -37,6 +38,9 @@ const ROLE_LABEL: Record<string, string> = {
   learner: 'Học viên',
 };
 
+const inputClass =
+  'w-full border border-default rounded-lg px-3 py-2 text-[12px] text-content placeholder:text-faint focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-colors';
+
 export default function OrgDetailPage() {
   const { accessToken, user } = useAuth();
   const { id } = useParams<{ id: string }>();
@@ -48,19 +52,16 @@ export default function OrgDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'orgchart'>('info');
 
-  // Edit org
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', address: '', phone: '', description: '' });
   const [saving, setSaving] = useState(false);
 
-  // Assign role
   const [showAssignRole, setShowAssignRole] = useState(false);
   const [assignForm, setAssignForm] = useState({ userId: '', role: 'company_admin' });
   const [allUsers, setAllUsers] = useState<UserInOrg[]>([]);
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
 
-  // Create admin (quick-create company_admin for this org)
   const [showCreateAdmin, setShowCreateAdmin] = useState(false);
   const [adminForm, setAdminForm] = useState({ email: '', fullName: '', password: '' });
   const [creatingAdmin, setCreatingAdmin] = useState(false);
@@ -102,8 +103,6 @@ export default function OrgDetailPage() {
 
   const loadUsers = () => {
     if (!accessToken) return;
-    // Use filterCompanyId for company-type orgs to get all users in that company
-    // Use deptId for dept/team orgs to get users directly in that org
     const param = org?.type === 'company'
       ? `filterCompanyId=${id}`
       : `deptId=${id}`;
@@ -250,15 +249,22 @@ export default function OrgDetailPage() {
   };
 
   if (isLoading) {
-    return <div className="flex h-64 items-center justify-center text-gray-400">Đang tải...</div>;
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
   }
 
   if (error || !org) {
     return (
-      <div className="p-6 text-center text-red-500">
-        {error ?? 'Không tìm thấy tổ chức'}
-        <br />
-        <button onClick={() => router.back()} className="mt-3 text-sm text-blue-600 hover:underline">← Quay lại</button>
+      <div className="max-w-5xl mx-auto space-y-3">
+        <div className="bg-danger-tint border border-danger/20 rounded-xl p-4 text-[12px] text-danger">
+          {error ?? 'Không tìm thấy tổ chức'}
+        </div>
+        <button onClick={() => router.back()} className="inline-flex items-center gap-1 text-[12px] text-primary hover:underline">
+          <ChevronLeft size={14} /> Quay lại
+        </button>
       </div>
     );
   }
@@ -266,86 +272,88 @@ export default function OrgDetailPage() {
   const typeLabel = { group: 'Tập đoàn', company: 'Công ty', dept: 'Phòng ban', team: 'Nhóm' }[org.type] ?? org.type;
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-4">
+
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-gray-500">
-        <button onClick={() => router.push('/organizations')} className="hover:text-blue-600">Tổ chức</button>
-        <span>/</span>
-        <span className="text-gray-900 font-medium">{org.name}</span>
+      <div className="flex items-center gap-2 text-[12px] text-subtle">
+        <button onClick={() => router.push('/organizations')} className="hover:text-primary transition-colors">Tổ chức</button>
+        <span className="text-faint">/</span>
+        <span className="text-content font-medium">{org.name}</span>
       </div>
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-4">
-          {/* Logo / upload area */}
-          <div className="relative group shrink-0">
-            {(org.metadata as Record<string, unknown>)?.logoUrl ? (
-              <img
-                src={(org.metadata as Record<string, string>).logoUrl}
-                alt="Logo"
-                className="w-14 h-14 rounded-xl object-contain border bg-white"
-              />
-            ) : (
-              <div className="w-14 h-14 rounded-xl bg-blue-100 flex items-center justify-center">
-                <span className="text-blue-700 font-bold text-xl">{org.code?.slice(0, 2) ?? org.name[0]}</span>
-              </div>
-            )}
-            {canEdit && (
-              <>
-                <button
-                  onClick={() => logoInputRef.current?.click()}
-                  disabled={uploadingLogo}
-                  className="absolute inset-0 rounded-xl flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity text-white text-xs font-medium disabled:opacity-30"
-                >
-                  {uploadingLogo ? '...' : 'Đổi logo'}
-                </button>
-                <input
-                  ref={logoInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleLogoUpload(f); }}
+      <div className="bg-surface border border-default rounded-xl shadow-card p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            {/* Logo */}
+            <div className="relative group shrink-0">
+              {(org.metadata as Record<string, unknown>)?.logoUrl ? (
+                <img
+                  src={(org.metadata as Record<string, string>).logoUrl}
+                  alt="Logo"
+                  className="w-14 h-14 rounded-xl object-contain border border-default bg-surface"
                 />
-              </>
-            )}
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{org.name}</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5 font-medium">{typeLabel}</span>
-              <span className="text-xs text-gray-400">Mã: {org.code}</span>
-              <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${
-                org.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
-              }`}>
-                {org.isActive ? 'Hoạt động' : 'Vô hiệu'}
-              </span>
+              ) : (
+                <div className="w-14 h-14 rounded-xl bg-primary-tint flex items-center justify-center">
+                  <span className="text-primary font-medium text-[17px]">{org.code?.slice(0, 2) ?? org.name[0]}</span>
+                </div>
+              )}
+              {canEdit && (
+                <>
+                  <button
+                    onClick={() => logoInputRef.current?.click()}
+                    disabled={uploadingLogo}
+                    className="absolute inset-0 rounded-xl flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity text-white text-[10px] font-medium disabled:opacity-30"
+                  >
+                    {uploadingLogo ? '...' : 'Đổi logo'}
+                  </button>
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleLogoUpload(f); }}
+                  />
+                </>
+              )}
+            </div>
+            <div>
+              <h1 className="text-[16px] font-medium text-content">{org.name}</h1>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <span className="text-[10px] bg-muted text-subtle rounded-full px-2 py-0.5 font-medium">{typeLabel}</span>
+                <span className="text-[11px] text-faint font-mono">Mã: {org.code}</span>
+                <span className={`text-[10px] rounded-full px-2 py-0.5 font-medium ${
+                  org.isActive ? 'bg-success-tint text-success' : 'bg-muted text-faint'
+                }`}>
+                  {org.isActive ? 'Hoạt động' : 'Vô hiệu'}
+                </span>
+              </div>
             </div>
           </div>
+          {canEdit && !editing && (
+            <button
+              onClick={() => { setEditing(true); setActiveTab('info'); }}
+              className="px-3 py-1.5 text-[12px] font-medium border border-default rounded-lg text-subtle hover:bg-muted transition-colors"
+            >
+              Chỉnh sửa
+            </button>
+          )}
         </div>
-        {canEdit && !editing && (
-          <button
-            onClick={() => { setEditing(true); setActiveTab('info'); }}
-            className="rounded-lg border px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Chỉnh sửa
-          </button>
-        )}
       </div>
 
       {/* Tabs */}
-      <div className="border-b flex gap-1">
+      <div className="flex gap-1 border-b border-default">
         {(['info', 'users', 'orgchart'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => {
               setActiveTab(tab);
               if (tab === 'users') loadUsers();
-              if (tab === 'orgchart') {/* handled by iframe */}
             }}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2.5 text-[12px] font-medium border-b-2 -mb-px transition-colors ${
               activeTab === tab
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-subtle hover:text-content'
             }`}
           >
             {tab === 'info' && 'Thông tin'}
@@ -357,62 +365,62 @@ export default function OrgDetailPage() {
 
       {/* Tab: Info */}
       {activeTab === 'info' && (
-        <div className="bg-white rounded-xl border p-6 space-y-5">
+        <div className="bg-surface border border-default rounded-xl shadow-card p-4 space-y-4">
           {editing ? (
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tên tổ chức</label>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Tên tổ chức</label>
                 <input
                   value={editForm.name}
                   onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputClass}
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Địa chỉ</label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Địa chỉ</label>
                 <input
                   value={editForm.address}
                   onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputClass}
                   placeholder="123 Đường ABC, TP.HCM"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Điện thoại</label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Điện thoại</label>
                 <input
                   value={editForm.phone}
                   onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputClass}
                   placeholder="028 1234 5678"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Mô tả</label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Mô tả</label>
                 <textarea
                   value={editForm.description}
                   onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                   rows={3}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inputClass}
                 />
               </div>
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <button
                   onClick={() => setEditing(false)}
-                  className="rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="px-4 py-2 text-[12px] border border-default rounded-lg text-subtle hover:bg-muted transition-colors"
                 >
                   Hủy
                 </button>
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="px-4 py-2 text-[12px] bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors disabled:opacity-50"
                 >
                   {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
                 </button>
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <InfoRow label="Tên tổ chức" value={org.name} />
               <InfoRow label="Mã" value={org.code} />
               <InfoRow label="Loại" value={typeLabel} />
@@ -427,20 +435,20 @@ export default function OrgDetailPage() {
       {/* Tab: Users */}
       {activeTab === 'users' && (
         <div className="space-y-4">
-          {/* Create Admin section — for group_admin on company-type orgs */}
+          {/* Create Admin section */}
           {isGroupAdmin && org.type === 'company' && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+            <div className="bg-warning-tint border border-warning/20 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-semibold text-amber-800">Quản trị viên công ty</p>
-                  <p className="text-xs text-amber-600 mt-0.5">
+                  <p className="text-[12px] font-medium text-warning">Quản trị viên công ty</p>
+                  <p className="text-[11px] text-warning/80 mt-0.5">
                     Tạo nhanh tài khoản company_admin cho công ty <strong>{org.name}</strong>.
                     Thông tin đăng nhập sẽ gửi qua email.
                   </p>
                 </div>
                 <button
                   onClick={() => { setShowCreateAdmin((v) => !v); setAdminMsg(null); }}
-                  className="px-3 py-1.5 text-xs bg-amber-500 text-white rounded-lg hover:bg-amber-600 whitespace-nowrap"
+                  className="px-3 py-1.5 text-[11px] bg-warning text-white rounded-lg hover:bg-warning/90 whitespace-nowrap transition-colors"
                 >
                   {showCreateAdmin ? 'Đóng' : '+ Tạo quản trị viên'}
                 </button>
@@ -449,48 +457,48 @@ export default function OrgDetailPage() {
               {showCreateAdmin && (
                 <form onSubmit={handleCreateAdmin} className="space-y-3 pt-1">
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Email <span className="text-red-500">*</span></label>
+                    <div className="space-y-1.5">
+                      <label className="block text-[11px] font-medium text-content">Email <span className="text-danger">*</span></label>
                       <input
                         type="email"
                         value={adminForm.email}
                         onChange={(e) => setAdminForm((f) => ({ ...f, email: e.target.value }))}
                         placeholder="admin@company.com"
                         required
-                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                        className={inputClass}
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">Họ tên <span className="text-red-500">*</span></label>
+                    <div className="space-y-1.5">
+                      <label className="block text-[11px] font-medium text-content">Họ tên <span className="text-danger">*</span></label>
                       <input
                         type="text"
                         value={adminForm.fullName}
                         onChange={(e) => setAdminForm((f) => ({ ...f, fullName: e.target.value }))}
                         placeholder="Nguyễn Văn A"
                         required
-                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                        className={inputClass}
                       />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Mật khẩu (để trống = tự tạo ngẫu nhiên)</label>
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-medium text-content">Mật khẩu <span className="text-[10px] text-faint font-normal">(để trống = tự tạo ngẫu nhiên)</span></label>
                     <input
                       type="text"
                       value={adminForm.password}
                       onChange={(e) => setAdminForm((f) => ({ ...f, password: e.target.value }))}
                       placeholder="Để trống để tạo ngẫu nhiên"
-                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white font-mono"
+                      className={`${inputClass} font-mono`}
                     />
                   </div>
                   {adminMsg && (
-                    <p className={`text-xs px-3 py-2 rounded-lg ${adminMsg.type === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                    <div className={`text-[11px] px-3 py-2 rounded-lg ${adminMsg.type === 'ok' ? 'bg-success-tint text-success' : 'bg-danger-tint text-danger'}`}>
                       {adminMsg.text}
-                    </p>
+                    </div>
                   )}
                   <button
                     type="submit"
                     disabled={creatingAdmin || !adminForm.email || !adminForm.fullName}
-                    className="px-4 py-2 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 font-medium"
+                    className="px-4 py-2 text-[12px] bg-warning hover:bg-warning/90 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
                   >
                     {creatingAdmin ? 'Đang tạo...' : 'Tạo tài khoản quản trị viên'}
                   </button>
@@ -500,13 +508,13 @@ export default function OrgDetailPage() {
           )}
 
           <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500">
+            <p className="text-[12px] text-subtle">
               {users.length} người dùng {org.type === 'company' ? 'thuộc công ty' : 'trong tổ chức'} này
             </p>
             {canEdit && (
               <button
                 onClick={() => { setShowAssignRole(true); loadAllUsers(); }}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg px-3 py-2 transition-colors"
               >
                 + Phân quyền người dùng
               </button>
@@ -514,83 +522,86 @@ export default function OrgDetailPage() {
           </div>
 
           {users.length === 0 ? (
-            <div className="text-center py-12 text-gray-400 bg-white rounded-xl border">
-              <p>Chưa có người dùng nào trong tổ chức này</p>
+            <div className="bg-surface border border-default rounded-xl shadow-card flex flex-col items-center justify-center py-12 px-4 text-center">
+              <p className="text-[12px] text-faint">Chưa có người dùng nào trong tổ chức này</p>
               {canEdit && (
-                <p className="text-sm mt-2">Nhấn &quot;Phân quyền người dùng&quot; để thêm người dùng</p>
+                <p className="text-[11px] text-faint mt-1">Nhấn &quot;Phân quyền người dùng&quot; để thêm người dùng</p>
               )}
             </div>
           ) : (
-            <div className="bg-white rounded-xl border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-gray-50">
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Họ tên</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Email</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Vai trò</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-600">Trạng thái</th>
-                    {canEdit && <th className="px-4 py-3" />}
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {users.map((u) => {
-                    const rolesHere = u.roles?.filter((r) => r.organizationId === id) ?? [];
-                    return (
-                      <tr key={u.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={() => router.push(`/users/${u.id}`)}
-                            className="font-medium text-gray-900 hover:text-blue-600"
-                          >
-                            {u.fullName}
-                          </button>
-                          {u.employeeCode && <p className="text-xs text-gray-400">{u.employeeCode}</p>}
-                        </td>
-                        <td className="px-4 py-3 text-gray-500">{u.email}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1">
-                            {rolesHere.length > 0
-                              ? rolesHere.map((r) => (
-                                  <span key={r.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                                    {ROLE_LABEL[r.role] ?? r.role}
-                                    {canEdit && (
-                                      <button
-                                        onClick={() => handleRemoveRole(u.id, r.id)}
-                                        disabled={removingRoleId === r.id}
-                                        className="text-blue-400 hover:text-red-500 ml-0.5 leading-none disabled:opacity-40"
-                                        title="Xóa phân quyền"
-                                      >
-                                        {removingRoleId === r.id ? '…' : '×'}
-                                      </button>
-                                    )}
-                                  </span>
-                                ))
-                              : <span className="text-gray-400 text-xs">—</span>
-                            }
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                            u.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                          }`}>
-                            {u.isActive ? 'Hoạt động' : 'Vô hiệu'}
-                          </span>
-                        </td>
-                        {canEdit && (
-                          <td className="px-4 py-3 text-right">
+            <div className="bg-surface border border-default rounded-xl shadow-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-default">
+                      <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Họ tên</th>
+                      <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Email</th>
+                      <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Vai trò</th>
+                      <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Trạng thái</th>
+                      {canEdit && <th className="px-4 py-2.5" />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((u) => {
+                      const rolesHere = u.roles?.filter((r) => r.organizationId === id) ?? [];
+                      return (
+                        <tr key={u.id} className="border-b border-default last:border-0 hover:bg-muted transition-colors">
+                          <td className="px-4 py-3">
                             <button
                               onClick={() => router.push(`/users/${u.id}`)}
-                              className="text-xs text-blue-600 hover:underline"
+                              className="text-[12px] font-medium text-content hover:text-primary transition-colors"
                             >
-                              Chi tiết
+                              {u.fullName}
                             </button>
+                            {u.employeeCode && <p className="text-[10px] text-faint">{u.employeeCode}</p>}
                           </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          <td className="px-4 py-3 text-[11px] text-subtle">{u.email}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1">
+                              {rolesHere.length > 0
+                                ? rolesHere.map((r) => (
+                                    <span key={r.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary-tint text-primary">
+                                      {ROLE_LABEL[r.role] ?? r.role}
+                                      {canEdit && (
+                                        <button
+                                          onClick={() => handleRemoveRole(u.id, r.id)}
+                                          disabled={removingRoleId === r.id}
+                                          className="text-primary/40 hover:text-danger ml-0.5 leading-none disabled:opacity-40"
+                                          title="Xóa phân quyền"
+                                        >
+                                          {removingRoleId === r.id ? '…' : '×'}
+                                        </button>
+                                      )}
+                                    </span>
+                                  ))
+                                : <span className="text-faint text-[11px]">—</span>
+                              }
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                              u.isActive ? 'bg-success-tint text-success' : 'bg-muted text-faint'
+                            }`}>
+                              {u.isActive && <span className="w-1.5 h-1.5 bg-success rounded-full" />}
+                              {u.isActive ? 'Hoạt động' : 'Vô hiệu'}
+                            </span>
+                          </td>
+                          {canEdit && (
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                onClick={() => router.push(`/users/${u.id}`)}
+                                className="text-[11px] text-primary hover:underline"
+                              >
+                                Chi tiết
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -598,8 +609,8 @@ export default function OrgDetailPage() {
 
       {/* Tab: Org chart */}
       {activeTab === 'orgchart' && (
-        <div className="bg-white rounded-xl border overflow-hidden h-[600px]">
-          <p className="text-xs text-gray-400 p-3 text-center">
+        <div className="bg-surface border border-default rounded-xl shadow-card overflow-hidden">
+          <p className="text-[11px] text-faint p-3 text-center">
             Sơ đồ tổ chức — dùng trang Import để tải sơ đồ theo cấu trúc phòng ban
           </p>
           <div className="flex flex-col gap-3 px-6 py-4">
@@ -611,19 +622,21 @@ export default function OrgDetailPage() {
       {/* Assign role modal */}
       {showAssignRole && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-xl">
-            <div className="px-6 py-5 border-b flex items-center justify-between">
-              <h2 className="font-semibold text-gray-900">Phân quyền người dùng</h2>
-              <button onClick={() => setShowAssignRole(false)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+          <div className="bg-surface rounded-xl shadow-card border border-default w-full max-w-md">
+            <div className="px-5 py-4 border-b border-default flex items-center justify-between">
+              <h2 className="text-[14px] font-medium text-content">Phân quyền người dùng</h2>
+              <button onClick={() => setShowAssignRole(false)} className="text-faint hover:text-content transition-colors">
+                <X size={16} />
+              </button>
             </div>
-            <form onSubmit={handleAssignRole} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Người dùng <span className="text-red-500">*</span></label>
+            <form onSubmit={handleAssignRole} className="p-5 space-y-3">
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Người dùng <span className="text-danger">*</span></label>
                 <select
                   value={assignForm.userId}
                   onChange={(e) => setAssignForm({ ...assignForm, userId: e.target.value })}
                   required
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-content focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 bg-surface"
                 >
                   <option value="">— Chọn người dùng —</option>
                   {allUsers.map((u) => (
@@ -631,12 +644,12 @@ export default function OrgDetailPage() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Vai trò <span className="text-red-500">*</span></label>
+              <div className="space-y-1.5">
+                <label className="block text-[12px] font-medium text-content">Vai trò <span className="text-danger">*</span></label>
                 <select
                   value={assignForm.role}
                   onChange={(e) => setAssignForm({ ...assignForm, role: e.target.value })}
-                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-content focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 bg-surface"
                 >
                   {isGroupAdmin && <option value="group_admin">Quản trị tập đoàn</option>}
                   {isGroupAdmin && <option value="group_hrm">HRM tập đoàn</option>}
@@ -646,25 +659,25 @@ export default function OrgDetailPage() {
                   <option value="learner">Học viên</option>
                 </select>
               </div>
-              <div className="bg-blue-50 rounded-lg p-3 text-xs text-blue-700">
+              <div className="bg-primary-tint border border-primary/15 rounded-lg p-3 text-[11px] text-primary">
                 <strong>Lưu ý:</strong> Vai trò sẽ được gán cho tổ chức <strong>{org.name}</strong>.
                 Người dùng cần được tạo trước qua trang <a href="/users" className="underline">Người dùng</a>.
               </div>
               {assignError && (
-                <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{assignError}</p>
+                <div className="bg-danger-tint border border-danger/20 rounded-lg px-3 py-2 text-[12px] text-danger">{assignError}</div>
               )}
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => setShowAssignRole(false)}
-                  className="flex-1 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="flex-1 rounded-lg border border-default px-4 py-2 text-[12px] font-medium text-subtle hover:bg-muted transition-colors"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
                   disabled={assigning || !assignForm.userId}
-                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="flex-1 rounded-lg bg-primary hover:bg-primary-dark px-4 py-2 text-[12px] font-medium text-white transition-colors disabled:opacity-50"
                 >
                   {assigning ? 'Đang lưu...' : 'Phân quyền'}
                 </button>
@@ -680,8 +693,8 @@ export default function OrgDetailPage() {
 function InfoRow({ label, value }: { label: string; value?: string | null }) {
   return (
     <div>
-      <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">{label}</p>
-      <p className="mt-1 text-sm text-gray-900">{value || <span className="text-gray-400">—</span>}</p>
+      <p className="text-[9px] font-medium text-faint uppercase tracking-widest">{label}</p>
+      <p className="mt-1 text-[12px] text-content">{value || <span className="text-faint">—</span>}</p>
     </div>
   );
 }
@@ -689,14 +702,14 @@ function InfoRow({ label, value }: { label: string; value?: string | null }) {
 function OrgTree({ nodes }: { nodes: OrgDetail[] }) {
   if (!nodes || nodes.length === 0) return null;
   return (
-    <ul className="space-y-2 pl-4 border-l-2 border-gray-100">
+    <ul className="space-y-2 pl-4 border-l-2 border-default">
       {nodes.map((node) => (
         <li key={node.id}>
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-blue-300 shrink-0" />
-            <span className="text-sm font-medium text-gray-800">{node.name}</span>
-            <span className="text-xs text-gray-400">({node.code})</span>
-            <span className="text-xs text-gray-400">— {node.type}</span>
+            <span className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />
+            <span className="text-[12px] font-medium text-content">{node.name}</span>
+            <span className="text-[10px] text-faint font-mono">({node.code})</span>
+            <span className="text-[10px] text-faint">— {node.type}</span>
           </div>
           {node.children && node.children.length > 0 && (
             <div className="mt-2 ml-4">

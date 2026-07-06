@@ -27,6 +27,7 @@ export const POST = withRole(
         10,
       );
       const difficulty = (formData.get('difficulty') as string) ?? 'medium';
+      const defaultCategoryId = (formData.get('defaultCategoryId') as string) || null;
 
       if (!file) throw new ValidationError('Thiếu file tài liệu');
       if (!ALLOWED_TYPES.has(file.type)) throw new ValidationError('Chỉ hỗ trợ PDF, DOCX, PPTX');
@@ -71,6 +72,8 @@ export const POST = withRole(
           questionTypes,
           questionsPerChunk,
           difficulty,
+          defaultCategoryId,
+          companyId,
         ).catch((err) => {
           console.error('[ImportDocument] Unexpected error in processor:', err);
         });

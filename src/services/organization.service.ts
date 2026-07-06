@@ -46,6 +46,8 @@ export interface OrgFlat {
   code: string;
   type: string;
   parentId: string | null;
+  userCount?: number;
+  positionCount?: number;
 }
 
 // ── Query helpers ─────────────────────────────────────────────
@@ -108,12 +110,41 @@ export async function getOrganizations(companyId: string, isGroupAdmin: boolean)
 }
 
 export async function getOrganization(id: string, companyId: string, isGroupAdmin: boolean) {
-  const org = await prisma.organization.findUnique({ where: { id } });
+  const org = await prisma.organization.findUnique({
+    where: { id },
+    include: {
+      deptPositions: {
+        select: {
+          id: true, title: true, code: true, level: true,
+          _count: { select: { users: true } },
+        },
+        orderBy: { title: 'asc' },
+        take: 20,
+      },
+      users: {
+        select: {
+          role: true,
+          user: { select: { id: true, fullName: true, jobTitle: true } },
+        },
+        take: 20,
+        orderBy: { assignedAt: 'asc' },
+      },
+    },
+  });
   if (!org || !org.isActive) throw new NotFoundError('Tổ chức');
   if (!isGroupAdmin && org.companyId !== companyId && org.id !== companyId) {
     throw new ForbiddenError('Không có quyền xem tổ chức này');
   }
-  return org;
+
+  return {
+    ...org,
+    users: org.users.map((ur) => ({
+      id: ur.user.id,
+      fullName: ur.user.fullName,
+      jobTitle: ur.user.jobTitle,
+      role: ur.role,
+    })),
+  };
 }
 
 export async function createOrganization(input: CreateOrgInput, companyId: string, isGroupAdmin: boolean) {
@@ -201,6 +232,33 @@ export async function getOrgFlat(companyId: string): Promise<OrgFlat[]> {
     });
     return orgs;
   });
+}
+
+/**
+ * Get flat list with user/position counts for org chart stats display.
+ */
+export async function getOrgFlatWithStats(companyId: string): Promise<OrgFlat[]> {
+  const orgs = await prisma.organization.findMany({
+    where: { companyId, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      type: true,
+      parentId: true,
+      _count: { select: { users: true, deptPositions: true } },
+    },
+    orderBy: { displayOrder: 'asc' },
+  });
+  return orgs.map((o) => ({
+    id: o.id,
+    name: o.name,
+    code: o.code,
+    type: o.type,
+    parentId: o.parentId,
+    userCount: o._count.users,
+    positionCount: o._count.deptPositions,
+  }));
 }
 
 /**
