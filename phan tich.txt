@@ -1,0 +1,164 @@
+ Plan: Thư viện tài liệu (Media Library)
+                                                                                                                                                                                                                                                                Context
+                                                                                                                                                                                                                                                                Hệ thống LMS hiện tại quản lý tài liệu/video theo ngữ cảnh bài học (lessonId) — không có trang duyệt file độc lập. Người dùng muốn một giao diện "thư viện tài liệu" với ctàinany_admin
+ liệu của công ty, không phụ thuộc vào từng khóa học cụ thể.
+
+ ---
+ Quyết định thiết kế: KHÔNG thêm schema mới
+
+ ContentAsset.organizationId đã ánh xạ mỗi tài liệu vào một node trong cây tổ chức (Organization). Cấu trúc thư mục tự nhiên là:
+
+ 📁 Dữ liệu chung  →  assets có organizationId = companyId (company root)
+ 📁 Kế toán        →  assets có organizationId = dept_ke_toan_id
+   📁 Tổ Thuế      →  assets có organizationId = team_thue_id
+ 📁 Nhân sự        →  assets có organizationId = dept_ns_id
+
+ MinIO path đã là {companyId}/{orgId}/{type}s/{assetId}{ext} — không cần migration.
+
+ ---
+ Files cần tạo / sửa
+
+ 1. Sửa: Download policy bypass cho admin
+
+ src/services/asset.service.ts
+ - Thêm param bypassPolicy: boolean = false vào hàm handleDownload
+ - Đổi check BLOCKED từ throw unconditional → if (policy === 'BLOCKED' && !bypassPolicy) throw
+
+ src/app/api/assets/[id]/download/route.ts
+ - Tính isPrivileged = user.roles.some(r => ['company_admin','hr_manager','group_admin','group_hrm'].includes(r))
+ - Truyền isPrivileged vào handleDownload(..., isPrivileged)
+
+ 2. Tạo: Media Library service
+
+ src/services/media-library.service.ts (file mới)
+ async getMediaLibraryTree(companyId, callerOrgId, isAdmin): Promise<MediaFolderNode[]>
+ - Gọi getOrgTree(companyId) (đã cache 30 phút trong tổ chức service)
+ - Chạy prisma.contentAsset.groupBy({ by: ['organizationId'], _count: { id: true } }) để lấy số lượng asset theo org
+ - Merge counts vào tree nodes
+ - Nếu không phải admin (instructor): prune tree về subtree của callerOrgId
+ - Label node company-root với isVirtualRoot: true (hiển thị là "Dữ liệu chung")
+ - Cache mediaLibTree:{companyId}:{callerOrgId} TTL 5 phút
+
+ Phải thêm cache invalidation trong confirmUpload của asset.service.ts:
+ await redisDelPattern(`mediaLibTree:${companyId}:*`);
+
+ 3. Tạo: API route tree
+
+ src/app/api/media-library/tree/route.ts (file mới)
+ - GET /api/media-library/tree
+ - Roles: ['company_admin', 'hr_manager', 'instructor']
+ - Lấy companyId từ req (tenant-injected), callerOrgId từ user.organizationId
+ - Gọi getMediaLibraryTree và trả về
+
+ Response shape:
+ {
+   "success": true,
+   "data": {
+     "tree": [{
+       "id": "uuid-company",
+       "name": "Dữ liệu chung",
+       "type": "company",
+       "isVirtualRoot": true,
+       "assetCount": 12,
+       "children": [
+         {
+           "id": "uuid-ke-toan",
+           "name": "Kế Toán",
+           "type": "dept",
+           "isVirtualRoot": false,
+           "assetCount": 5,
+           "children": [...]
+         }
+       ]
+     }]
+   }
+ }
+
+ 4. Tạo: UI page
+
+ src/app/(dashboard)/media-library/page.tsx (file mới)
+
+ Layout 2 panel:
+ ┌────────────────────────────────────────────────────────┐
+ │ Thư viện tài liệu                    [+ Tải lên]       │
+ ├─────────────────────┬──────────────────────────────────┤
+ │ LEFT w-64           │ RIGHT flex-1                     │
+ │ [tìm kiếm thư mục]  │ [tìm tên file] [lọc loại ▼]     │
+ │                     │                                  │
+ │ ▼ Dữ liệu chung(12) │ ┌────┐ ┌────┐ ┌────┐            │
+ │   ▶ Kế Toán (5)     │ │ 📹 │ │ 📄 │ │ 📊 │ ...        │
+ │     Nhân sự (3)     │ └────┘ └────┘ └────┘            │
+ │     ...             │ [← Prev] [1/3] [Next →]         │
+ └─────────────────────┴──────────────────────────────────┘
+
+ State:
+ - tree, selectedFolderId, expandedNodes: Set<string>
+ - assets, assetsMeta, assetsLoading, treeLoading
+ - search, typeFilter, page
+ - previewAsset, previewUrl
+
+ Các sub-component nội tuyến trong file (không tách file riêng):
+ - FolderTree: render tree đệ quy, node company hiển thị "Dữ liệu chung", có badge đếm asset
+ - AssetGrid: grid responsive, mỗi card có icon loại file, title, kích thước, ngày upload, 2 nút [Xem trước] [Tải về]
+ - PreviewModal: overlay toàn màn hình
+   - video → dùng GET /api/assets/{id}/stream-url, render <video controls>
+   - document/presentation → dùng GET /api/assets/{id}/view-url, render <iframe>
+   - image → render <img>
+   - audio → render <audio controls>
+
+ Data flow:
+ 1. Mount → GET /api/media-library/tree → populate tree, auto-select root
+ 2. selectedFolderId change → GET /api/assets?orgId={id}&type={filter}&page={page}&limit=20
+ 3. Download → POST /api/assets/{id}/download → nếu data.url tồn tại → window.open(url, '_blank')
+ 4. Preview → fetch stream/view URL → mở modal
+
+ Upload (chỉ company_admin/hr_manager): Modal tái sử dụng flow 2 bước hiện tại (/api/assets/upload-url + /api/assets), pre-fill organizationId = selectedFolderId.
+
+ 5. Sửa: Sidebar navigation
+
+ src/app/(dashboard)/layout.tsx
+ - Thêm nav item { href: '/media-library', label: 'Thư viện tài liệu', icon: FolderOpen, roles: ['company_admin', 'hr_manager', 'instructor'] }
+ - Đặt sau mục "Khóa học" trong nav list
+
+ ---
+ Bảng tái sử dụng code
+
+ ┌─────────────────┬─────────────────────────────────────────────────┐
+ │    Tính năng    │          Tái sử dụng (không code lại)           │
+ ├─────────────────┼─────────────────────────────────────────────────┤
+ │ Org tree fetch  │ getOrgTree() trong organization.service.ts      │
+ ├─────────────────┼─────────────────────────────────────────────────┤
+ │ Asset listing   │ GET /api/assets?orgId=&type=&page=              │
+ ├─────────────────┼─────────────────────────────────────────────────┤
+ │ Stream URL      │ GET /api/assets/{id}/stream-url                 │
+ ├─────────────────┼─────────────────────────────────────────────────┤
+ │ View URL        │ GET /api/assets/{id}/view-url                   │
+ ├─────────────────┼─────────────────────────────────────────────────┤
+ │ Upload flow     │ upload-url + confirm endpoints hiện có          │
+ ├─────────────────┼─────────────────────────────────────────────────┤
+ │ Auth middleware │ withRole, withAuth                              │
+ ├─────────────────┼─────────────────────────────────────────────────┤
+ │ Toast           │ useToast từ @/components/ui/toast               │
+ ├─────────────────┼─────────────────────────────────────────────────┤
+ │ Auth context    │ useAuth từ @/components/providers/auth-provider │
+ └─────────────────┴─────────────────────────────────────────────────┘
+
+ ---
+ Thứ tự thực hiện
+
+ 1. Step 1 — Fix download bypass (ít rủi ro nhất, độc lập)
+ 2. Step 2 — Tạo media-library.service.ts
+ 3. Step 3 — Tạo API route /api/media-library/tree
+ 4. Step 4 — Tạo UI page media-library/page.tsx
+ 5. Step 5 — Thêm sidebar nav entry
+ 6. Build + restart PM2 + ghi deploy.md + commit
+
+ ---
+ Verification
+
+ - company_admin login → thấy "Thư viện tài liệu" trong sidebar
+ - Click thư mục "Dữ liệu chung" → thấy danh sách asset cấp công ty
+ - Click thư mục "Kế Toán" → thấy asset của bộ phận đó
+ - Nút [Tải về] → tải được kể cả asset có policy BLOCKED
+ - instructor login → chỉ thấy thư mục bộ phận của mình
+ - Nút [Xem trước] → video phát inline, PDF hiển thị trong iframe
