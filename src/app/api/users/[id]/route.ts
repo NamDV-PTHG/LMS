@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withRole } from '@/middleware/require-role';
 import { getUserById, updateUser, updateUserSchema } from '@/services/user.service';
 import { handleApiError } from '@/app/api/error-handler';
-import { ValidationError } from '@/lib/errors';
+import { ForbiddenError, ValidationError } from '@/lib/errors';
 
 export const GET = withRole(
   ['group_admin', 'company_admin', 'hr_manager'],
@@ -21,6 +21,14 @@ export const PATCH = withRole(
       const parsed = updateUserSchema.safeParse(body);
       if (!parsed.success) {
         throw new ValidationError('Dữ liệu không hợp lệ', parsed.error.flatten().fieldErrors);
+      }
+
+      // Chỉ group_admin và company_admin mới được bật/tắt quyền AI
+      if (parsed.data.aiEnabled !== undefined) {
+        const isAdmin = user.roles.includes('group_admin') || user.roles.includes('company_admin');
+        if (!isAdmin) {
+          throw new ForbiddenError('Chỉ Admin công ty mới có thể phân quyền sử dụng AI');
+        }
       }
 
       const isGroupAdmin = user.roles.includes('group_admin');

@@ -56,7 +56,10 @@ const inputClass =
 
 export default function UserDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { accessToken } = useAuth();
+  const { accessToken, user: currentUser } = useAuth();
+  const canManageAI = currentUser?.roles.some(
+    (r) => r.role === 'group_admin' || r.role === 'company_admin',
+  ) ?? false;
   const router = useRouter();
 
   const [user, setUser] = useState<UserDetail | null>(null);
@@ -381,17 +384,19 @@ export default function UserDetailPage() {
           >
             {toggling ? 'Đang xử lý...' : user.isActive ? 'Vô hiệu hóa' : 'Kích hoạt'}
           </button>
-          <button
-            onClick={handleToggleAI}
-            className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${
-              user.aiEnabled
-                ? 'border-primary/30 text-primary hover:bg-primary-tint'
-                : 'border-default text-subtle hover:bg-muted'
-            }`}
-            title={user.aiEnabled ? 'Tắt quyền dùng AI' : 'Bật quyền dùng AI'}
-          >
-            {user.aiEnabled ? '🤖 Tắt AI' : '🤖 Bật AI'}
-          </button>
+          {canManageAI && (
+            <button
+              onClick={handleToggleAI}
+              className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${
+                user.aiEnabled
+                  ? 'border-primary/30 text-primary hover:bg-primary-tint'
+                  : 'border-default text-subtle hover:bg-muted'
+              }`}
+              title={user.aiEnabled ? 'Tắt quyền dùng AI' : 'Bật quyền dùng AI'}
+            >
+              {user.aiEnabled ? '🤖 Tắt AI' : '🤖 Bật AI'}
+            </button>
+          )}
         </div>
       </div>
 

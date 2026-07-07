@@ -3,6 +3,22 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-07 20:10] Fix: Phân quyền bật/tắt AI chỉ dành cho company_admin / group_admin
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/api/users/[id]/route.ts` — PATCH handler: chặn `hr_manager` set `aiEnabled`, chỉ `group_admin` và `company_admin` mới được phép
+- `src/app/(dashboard)/users/[id]/page.tsx` — ẩn nút "Bật/Tắt AI" với người dùng không có quyền admin
+
+**Kết quả:**
+- API trả về `403 FORBIDDEN` khi `hr_manager` gửi `aiEnabled` trong body
+- Các trường khác (`fullName`, `jobTitle`...) vẫn cho phép `hr_manager` cập nhật bình thường
+- Build thành công, `lms-web` online
+
+**Lưu ý / Rủi ro:**
+- Không ảnh hưởng `group_admin` và `company_admin` — vẫn toggle AI bình thường
+
 ## [2026-07-07 19:35] Docs: Hoàn thiện tài liệu hướng dẫn 3 vai trò — có ảnh thực tế
 
 **Loại:** docs
