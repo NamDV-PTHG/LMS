@@ -84,8 +84,8 @@ export const POST = withRole(
       });
 
       // Send welcome email — await để biết kết quả thực tế
-      const loginUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3004';
-      const emailResult = await sendWelcomeEmail(email, fullName.trim(), plainPassword, loginUrl);
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://lms.phuthaiholdings.com:5980';
+      const emailResult = await sendWelcomeEmail(email, fullName.trim(), plainPassword, `${baseUrl}/login`, `${baseUrl}/app`);
       if (!emailResult.success) {
         console.error(`[Admin] Gửi welcome email thất bại cho ${email}:`, emailResult.error);
       }

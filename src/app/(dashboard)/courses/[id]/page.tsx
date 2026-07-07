@@ -98,6 +98,16 @@ export default function CourseEditorPage() {
   const isGroupAdmin = userRoles.includes('group_admin') || userRoles.includes('group_hrm');
   const isCompanyAdmin = userRoles.includes('company_admin') || userRoles.includes('hr_manager');
 
+  // Redirect pure learners to the learning page — this page is admin/instructor-only
+  useEffect(() => {
+    if (!user || userRoles.length === 0) return;
+    const hasAdminRole = userRoles.some((r) =>
+      ['group_admin', 'group_hrm', 'company_admin', 'hr_manager', 'instructor'].includes(r),
+    );
+    if (!hasAdminRole) router.replace(`/my-courses/${id}`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   const [activeTab, setActiveTab] = useState<'content' | 'assign' | 'share' | 'ratings'>('content');
   const [ratingsData, setRatingsData] = useState<{
     ratings: Array<{ id: string; rating: number; comment: string | null; createdAt: string; user: { fullName: string; employeeCode: string | null } }>;
@@ -444,7 +454,7 @@ export default function CourseEditorPage() {
     try {
       const res = await fetch(`/api/learning-groups/${assignForm.groupId}/courses`, {
         method: 'POST', headers: authHeader,
-        body: JSON.stringify({ courseId: id, deadline: assignForm.deadline || undefined }),
+        body: JSON.stringify({ courseId: id, deadline: assignForm.deadline ? new Date(assignForm.deadline).toISOString() : undefined }),
       }).then((r) => r.json());
       if (res.success) {
         setAssignMsg({ type: 'ok', text: 'Đã giao khóa học cho nhóm học tập!' });
@@ -461,7 +471,7 @@ export default function CourseEditorPage() {
     try {
       const body: Record<string, unknown> = {
         isMandatory: assignForm.isMandatory,
-        deadline: assignForm.deadline || undefined,
+        deadline: assignForm.deadline ? new Date(assignForm.deadline).toISOString() : undefined,
       };
       if (assignForm.deptId) body.targetDeptId = assignForm.deptId;
       const res = await fetch(`/api/courses/${id}/assign`, {
@@ -488,7 +498,7 @@ export default function CourseEditorPage() {
         body: JSON.stringify({
           targetUserId: assignForm.userId,
           isMandatory: assignForm.isMandatory,
-          deadline: assignForm.deadline || undefined,
+          deadline: assignForm.deadline ? new Date(assignForm.deadline).toISOString() : undefined,
         }),
       }).then((r) => r.json());
       if (res.success) {

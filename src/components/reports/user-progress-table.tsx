@@ -71,7 +71,7 @@ export function UserProgressTable({
                           style={{ width: `${r.progressPct}%` }}
                         />
                       </div>
-                      <span className="text-xs w-8">{r.progressPct}%</span>
+                      <span className="text-xs w-8">{Math.round(r.progressPct)}%</span>
                     </div>
                   ) : '—'}
                 </td>

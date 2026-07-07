@@ -16,6 +16,9 @@ const nextConfig = {
       'minio',
       'nodemailer',
       'dns',
+      'pdfjs-dist',
+      'tesseract.js',
+      '@napi-rs/canvas',
     ],
   },
   webpack: (config, { isServer }) => {

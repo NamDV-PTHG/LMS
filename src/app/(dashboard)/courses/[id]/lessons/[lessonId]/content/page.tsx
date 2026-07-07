@@ -43,15 +43,37 @@ const VISIBILITY_LABEL: Record<string, string> = {
   GROUP_WIDE:   'Toàn tập đoàn',
 };
 
+/** Fallback MIME type from file extension — needed on Windows where file.type may be empty */
+function getMimeFromExtension(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  const map: Record<string, string> = {
+    pdf:  'application/pdf',
+    doc:  'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls:  'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt:  'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    mp4:  'video/mp4',
+    webm: 'video/webm',
+    mp3:  'audio/mpeg',
+    wav:  'audio/wav',
+    jpg:  'image/jpeg',
+    jpeg: 'image/jpeg',
+    png:  'image/png',
+    gif:  'image/gif',
+    webp: 'image/webp',
+  };
+  return map[ext] ?? 'application/octet-stream';
+}
+
 function detectFileType(file: File): string {
-  if (file.type.startsWith('video/'))  return 'video';
-  if (file.type.startsWith('audio/'))  return 'audio';
-  if (file.type.startsWith('image/'))  return 'image';
-  if (
-    file.type.includes('presentation') ||
-    file.name.endsWith('.pptx') ||
-    file.name.endsWith('.ppt')
-  ) return 'presentation';
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+  const mime = file.type || getMimeFromExtension(file.name);
+  if (mime.startsWith('video/') || ['mp4','webm','mov','avi'].includes(ext)) return 'video';
+  if (mime.startsWith('audio/') || ['mp3','wav','ogg','m4a'].includes(ext)) return 'audio';
+  if (mime.startsWith('image/') || ['jpg','jpeg','png','gif','webp'].includes(ext)) return 'image';
+  if (mime.includes('presentation') || ['pptx','ppt'].includes(ext)) return 'presentation';
   return 'document';
 }
 
@@ -209,7 +231,7 @@ export default function LessonContentPage() {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/assets/upload');
     xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
-    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.setRequestHeader('Content-Type', file.type || getMimeFromExtension(file.name));
     xhr.setRequestHeader('X-File-Type', fileType);
 
     xhr.upload.onprogress = (e) => {
@@ -258,7 +280,7 @@ export default function LessonContentPage() {
             organizationId,
             title: uploadTitle.trim(),
             fileType,
-            mimeType: file.type || 'application/octet-stream',
+            mimeType: file.type || getMimeFromExtension(file.name),
             fileSizeBytes: file.size,
             tempObjectName: uploadRes.data!.tempObjectName,
           }),

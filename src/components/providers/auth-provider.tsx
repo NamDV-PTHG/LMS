@@ -1,8 +1,18 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
+
+/** Decode JWT payload (client-side, no signature verification) to read exp */
+function getTokenExpiry(token: string): number {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return typeof payload.exp === 'number' ? payload.exp : 0;
+  } catch {
+    return 0;
+  }
+}
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -104,12 +114,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push('/login');
   }, [accessToken, router]);
 
-  // Auto-refresh access token 2 minutes before expiry (token is 15m)
+  // Auto-refresh: schedule refresh 60s before the token's actual expiry
   useEffect(() => {
     if (!accessToken) return;
-    const timer = setTimeout(() => refreshToken(), 13 * 60 * 1000);
+    const exp = getTokenExpiry(accessToken);
+    if (!exp) return;
+    const msUntilRefresh = (exp * 1000) - Date.now() - 60_000; // 60s before expiry
+    if (msUntilRefresh <= 0) {
+      // Token already expired or about to — refresh immediately
+      refreshToken();
+      return;
+    }
+    const timer = setTimeout(() => refreshToken(), msUntilRefresh);
     return () => clearTimeout(timer);
   }, [accessToken, refreshToken]);
+
+  // Refresh on page focus after device sleep / tab switch
+  // Stores the last-known token in a ref so the handler always sees the latest value
+  const accessTokenRef = useRef(accessToken);
+  useEffect(() => { accessTokenRef.current = accessToken; }, [accessToken]);
+
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const token = accessTokenRef.current;
+      if (!token) return;
+      const exp = getTokenExpiry(token);
+      const now = Math.floor(Date.now() / 1000);
+      // Refresh if less than 60 seconds left (covers device sleep where timers don't fire)
+      if (exp - now < 60) {
+        const newToken = await refreshToken();
+        if (newToken) {
+          const profile = await fetchMe(newToken);
+          if (profile) setUser(profile);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [refreshToken, fetchMe]);
 
   return (
     <AuthContext.Provider value={{ user, accessToken, isLoading, login, logout, refreshToken }}>

@@ -39,10 +39,13 @@ export function StepCourseInfo({ value, onChange, onNext }: Props) {
     onChange({ ...value, objectives: value.objectives.filter((_, idx) => idx !== i) });
   };
 
+  const [ocrMode, setOcrMode] = useState(false);
+
   const processFile = useCallback(async (file: File) => {
     const ext = (file.name.split('.').pop() ?? '').toLowerCase();
     setExtractError(null);
     setExtractedFile(null);
+    setOcrMode(false);
 
     if (!ACCEPTED_EXTS.includes(ext)) {
       setExtractError(`Không hỗ trợ định dạng .${ext}. Vui lòng dùng TXT, PDF hoặc DOCX.`);
@@ -50,15 +53,16 @@ export function StepCourseInfo({ value, onChange, onNext }: Props) {
     }
 
     if (ext === 'txt') {
-      // Read TXT directly in browser — no server round-trip needed
       const text = await file.text();
       onChange({ ...value, documentText: text });
       setExtractedFile(file.name);
       return;
     }
 
-    // PDF / DOCX → server-side extraction
+    // PDF / DOCX → server-side extraction (may include OCR for scanned PDFs)
     setExtracting(true);
+    // After 3s without response, hint that OCR might be running
+    const ocrHintTimer = setTimeout(() => setOcrMode(true), 3000);
     try {
       const fd = new FormData();
       fd.append('file', file);
@@ -71,12 +75,14 @@ export function StepCourseInfo({ value, onChange, onNext }: Props) {
       if (json.success) {
         onChange({ ...value, documentText: json.data.text });
         setExtractedFile(file.name);
+        if (json.data.usedOcr) setOcrMode(true); // keep badge showing OCR was used
       } else {
         setExtractError(json.error ?? 'Không thể trích xuất nội dung file');
       }
     } catch {
       setExtractError('Lỗi kết nối khi xử lý file');
     } finally {
+      clearTimeout(ocrHintTimer);
       setExtracting(false);
     }
   }, [value, onChange, accessToken]);
@@ -159,7 +165,16 @@ export function StepCourseInfo({ value, onChange, onNext }: Props) {
           }`}
         >
           {extracting ? (
-            <p className="text-sm text-blue-600">Đang trích xuất nội dung...</p>
+            <div className="space-y-1">
+              <p className="text-sm text-blue-600">
+                {ocrMode ? 'Đang nhận dạng văn bản (OCR)...' : 'Đang trích xuất nội dung...'}
+              </p>
+              {ocrMode && (
+                <p className="text-xs text-gray-400">
+                  PDF hình ảnh cần xử lý OCR — có thể mất 30–60 giây
+                </p>
+              )}
+            </div>
           ) : (
             <>
               <p className="text-sm text-gray-500 mb-2">
@@ -187,18 +202,23 @@ export function StepCourseInfo({ value, onChange, onNext }: Props) {
 
         {/* Extracted file badge */}
         {extractedFile && !extracting && (
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <span className="inline-flex items-center gap-1.5 bg-green-50 border border-green-200 text-green-700 text-xs px-2.5 py-1 rounded-full">
               <span>📄</span>
               <span>{extractedFile}</span>
               <button
-                onClick={() => { setExtractedFile(null); onChange({ ...value, documentText: '' }); }}
+                onClick={() => { setExtractedFile(null); setOcrMode(false); onChange({ ...value, documentText: '' }); }}
                 className="text-green-400 hover:text-red-500 ml-0.5"
                 title="Xóa file"
               >
                 ×
               </button>
             </span>
+            {ocrMode ? (
+              <span className="text-xs bg-purple-50 border border-purple-200 text-purple-700 px-2 py-0.5 rounded-full">
+                🔍 OCR
+              </span>
+            ) : null}
             <span className="text-xs text-gray-400">Nội dung đã được trích xuất</span>
           </div>
         )}

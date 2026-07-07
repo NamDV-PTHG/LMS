@@ -186,7 +186,7 @@ function CourseRow({ course, onPress }: { course: RecentCourse; onPress: () => v
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
         {!isCompleted && (
-          <span className="text-[11px] text-faint">{course.progressPercent}%</span>
+          <span className="text-[11px] text-faint">{Math.round(course.progressPercent)}%</span>
         )}
         <ChevronRight size={14} className="text-faint" />
       </div>

@@ -3,6 +3,248 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-07 17:50] Fix: Bổ sung link ứng dụng di động vào email chào mừng tạo tài khoản
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/email.service.ts` — thêm tham số `appUrl?: string` vào `sendWelcomeEmail`; bổ sung section "Ứng dụng di động (PWA)" vào HTML template với nút "Mở ứng dụng" + link + hướng dẫn thêm vào màn hình chính
+- `src/app/api/users/route.ts` — truyền `${baseUrl}/app` làm appUrl khi gọi `sendWelcomeEmail`
+- `src/app/api/organizations/[id]/admin/route.ts` — truyền `${baseUrl}/login` (fix bug thiếu `/login`) + `${baseUrl}/app` khi gọi `sendWelcomeEmail`
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → status online
+- Email tạo tài khoản mới bao gồm cả link web (`/login`) và link app (`/app`)
+
+**Lưu ý / Rủi ro:**
+- `appUrl` là optional — nếu không truyền thì section app không hiện (backward-compatible)
+- Đồng thời fix bug silent trong `organizations/[id]/admin/route.ts` đang truyền base URL thay vì `/login` URL
+
+## [2026-07-07 10:55] feat: Sidebar navigation
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/components/web/sidebar.tsx` — tạo mới: sidebar với navigation theo role, collapse/expand, profile, logout
+- `src/components/web/web-shell.tsx` — cập nhật: thêm Sidebar vào layout (flex row: sidebar + main content)
+
+**Sidebar navigation theo role:**
+- `group_admin` / `group_hrm`: Dashboard, Tổ chức, Người dùng, Khóa học, Nhóm học tập, Lộ trình học, Vị trí công việc, Khung năng lực, Thay đổi vị trí, Báo cáo, Cấu hình AI, Cài đặt
+- `company_admin` / `hr_manager`: tập con (không có AI config, Tổ chức)
+- `instructor`: Dashboard, Khóa học, Ngân hàng câu hỏi
+- `learner`: Dashboard, Khóa học của tôi, Lộ trình của tôi
+
+**Kết quả:**
+- Build: thành công
+- PM2 lms-web: restarted (pid: 8980)
+
+
+## [2026-07-07 17:30] Refactor: Chuẩn hóa giao diện 5 trang quản trị — AdminDataTable + StatusBadge
+
+**Loại:** refactor
+
+**Các thay đổi:**
+- Tạo mới `src/components/admin/StatusBadge.tsx` — pill badge 5 variant (success/warning/info-blue/info-purple/neutral) dùng design token từ tailwind.config.ts
+- Tạo mới `src/components/admin/AdminDataTable.tsx` — generic `AdminDataTable<T>` với header bar bg-primary, responsive table, ActionBtn export (blue/purple/gray)
+- Refactor `src/app/(dashboard)/learning-paths/page.tsx` — thay card layout bằng AdminDataTable (7 cột: tên, trạng thái, bước học, học viên, hạn, toggle hiển thị, thao tác)
+- Refactor `src/app/(dashboard)/learning-groups/page.tsx` — thay card lưới 2 cột bằng AdminDataTable (5 cột: tên, loại, thành viên, khóa học, thao tác)
+- Refactor `src/app/(dashboard)/competency-frameworks/page.tsx` — thay card layout bằng AdminDataTable (6 cột: tên, phiên bản, trạng thái, lĩnh vực, vị trí, thao tác)
+- Refactor `src/app/(dashboard)/positions/page.tsx` — thay bảng tự phát bằng AdminDataTable (6 cột: vị trí+badge, cấp bậc, khung NL, nhân viên, trạng thái, 3 nút thao tác)
+- Refactor `src/app/(dashboard)/question-banks/page.tsx` — thay card lưới 3 cột bằng AdminDataTable (5 cột: tên, mô tả rút gọn, số câu, trạng thái, thao tác)
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → status online
+- Toàn bộ logic fetch, RBAC, action handler, modal giữ nguyên — chỉ thay lớp trình bày
+- Badge màu nhất quán xuyên suốt 5 trang theo đúng bảng variant
+
+**Lưu ý / Rủi ro:**
+- Không có breaking change; các component mới hoàn toàn additive
+- `info-purple` badge dùng hardcode hex `#EEEDFE / #3C3489` vì token này chưa có trong tailwind.config.ts
+
+## [2026-07-07 15:45] Fix: Học viên bị vào trang chỉnh sửa khóa học thay vì trang học
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/(dashboard)/courses/page.tsx` — redirect học viên sang `/my-courses`. Trang `/courses` là management page, không có role check → học viên vào thấy "Xem chi tiết →" dẫn đến edit page
+- `src/app/(dashboard)/courses/[id]/page.tsx` — redirect học viên sang `/my-courses/${id}` bằng `useEffect` khi phát hiện user không có role admin/instructor
+- `src/app/(dashboard)/dashboard/page.tsx` — thêm link "Khóa học của tôi" → `/my-courses` vào navLinks cho role `learner`
+
+**Kết quả:**
+- Build OK, `pm2 restart lms-web` — online
+- Học viên vào `/courses` hoặc `/courses/${id}` bị redirect tự động đến đúng trang học
+
+**Lưu ý / Rủi ro:**
+- Dùng `router.replace()` (không để lại history) tránh back button quay lại trang edit
+
+## [2026-07-07 09:25] Fix: Login page không load + Seed dữ liệu ban đầu
+
+**Loại:** fix + deploy
+
+**Các thay đổi:**
+- `C:\nginx\conf\nginx.conf` (remote 10.191.36.72): thêm `location = / { return 302 /login; }` trước catch-all location để bypass lỗi Next.js ISR cache trả 307 không có Location header
+- Chạy seed dữ liệu ban đầu qua `ts-node prisma/seed.ts` trên production server (SYSTEM task)
+
+**Kết quả:**
+- `https://lms.phuthaiholdings.com:5985/` → HTTP 302 → `/login` (OK)
+- `https://lms.phuthaiholdings.com:5985/login` → HTTP 200 (OK)
+- 7 users đã được tạo trong database:
+  - `group_admin@via.vn` / `Password@123` — role: group_admin
+  - `group_hrm@via.vn` / `Password@123` — role: group_hrm
+  - `company_admin@via.vn` / `Password@123` — role: company_admin
+  - `hr_manager@via.vn` / `Password@123` — role: hr_manager
+  - `instructor@via.vn` / `Password@123` — role: instructor
+  - `learner1@via.vn` / `Password@123` — role: learner
+  - `learner2@via.vn` / `Password@123` — role: learner
+- PM2: lms-web (online 16h), lms-worker (online 14h)
+
+**Lưu ý / Rủi ro:**
+- Root cause lỗi login: Next.js `redirect('/dashboard')` trong `page.tsx` tạo 307 nhưng ISR cache không lưu Location header → browser bị stuck. Fix nginx-level là permanent, không cần sửa code Next.js.
+- Password tất cả accounts là `Password@123` — cần đổi sau khi deploy xong.
+
+## [2026-07-06 15:30] Fix: 3 bugs — PDF lesson upload, learning_path enrollment, token expiry on sleep
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/course.service.ts` — thêm `'pdf'` và `'image'` vào `createLessonSchema.contentType` enum. Course builder UI cho phép chọn contentType 'pdf' nhưng Zod validation thiếu giá trị này → báo "Dữ liệu không hợp lệ" khi tạo bài học PDF
+- `prisma/schema.prisma` — thêm `learning_path` vào enum `EnrollmentSource`. Raw SQL UNION query trả về source='learning_path' nhưng Prisma enum thiếu → PrismaClientValidationError khi enroll khóa học từ learning path → user bị block khỏi khóa học
+- `src/components/providers/auth-provider.tsx` — sửa auto-refresh timer: tính thời gian refresh từ JWT exp thực tế thay vì hardcode 13 phút; thêm `visibilitychange` listener để refresh token khi trang active lại sau khi device sleep (timer JS bị dừng khi sleep → token hết hạn mà không được refresh)
+
+**Kết quả:**
+- `prisma db push` thành công — enum mới sync với DB
+- `prisma generate` thành công (sau khi stop PM2)
+- `npm run build` thành công
+- `pm2 start lms-web lms-worker` — cả hai `online`
+
+**Lưu ý / Rủi ro:**
+- `learning_path` enum value mới không cần migration data vì chỉ thêm mới, không sửa giá trị cũ
+- Token refresh khi `visibilitychange` chỉ fire nếu còn < 60s trước khi hết hạn — không refresh thừa khi user chuyển tab nhanh
+
+## [2026-07-07] feat: OCR cho PDF hình ảnh trong Course Wizard
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `package.json`: Thêm `tesseract.js@7.0.0` và `@napi-rs/canvas@1.0.2`
+- `next.config.js`: Thêm `pdfjs-dist`, `tesseract.js`, `@napi-rs/canvas` vào `serverExternalPackages`
+- `src/app/api/wizard/extract-text/route.ts`: Pipeline 2 bước — native extraction trước, OCR fallback (pdfjs-dist → @napi-rs/canvas → tesseract.js `vie+eng`) nếu ít hơn 80 ký tự
+- `src/components/wizard/step-course-info.tsx`: UX — hiện trạng thái OCR, badge "🔍 OCR", ghi chú thời gian
+
+**Kết quả:**
+- Build thành công, pm2 → online; lần đầu OCR download ~5MB traineddata → cache `.tesseract-lang/`
+
+**Lưu ý:** OCR tối đa 15 trang; PDF scan chất lượng thấp → kết quả kém; server cần internet cho lần download đầu
+
+---
+
+## [2026-07-06 19:30] deploy: PHASE 1 — First Deploy lên production server 10.191.36.72
+
+**Loại:** deploy
+
+**Các thay đổi:**
+- Clone repo `NamDV-PTHG/LMS` vào `D:\LMS PTHG` (junction `D:\LMSPTHG`)
+- Tạo file `.env` với cấu hình production (DB, Redis, MinIO, NextAuth, JWT)
+- Đã fix localhost DNS bằng cách thêm `127.0.0.1 localhost` vào hosts file
+- Đã thay tất cả `localhost` → `127.0.0.1` trong `.env` (DB, Redis, MinIO, AI service)
+- `npm ci` cài dependencies
+- `npx prisma generate` + `prisma db push` tạo toàn bộ schema
+- `npm run build` (Next.js 14) — build thành công sau khi resolve EAI_FAIL localhost + Redis 5.0.14
+- Tạo `components/web/web-shell.tsx` (import thiếu từ layout.tsx)
+- PM2 7.0.3 khởi động: lms-web (port 3004) + lms-worker
+- MinIO 1.x chạy trên port 9000/9001, tạo bucket `lms-private` và `lms-temp`
+- Nginx cấu hình SSL trên port 5985, proxy → 127.0.0.1:3004
+
+**Kết quả:**
+- lms-web: **online** (Next.js 14.2.29, port 3004) ✅
+- lms-worker: **online** ✅
+- PostgreSQL 15: Running (port 5432) ✅
+- Redis 5.0.14: Running (port 6379) ✅
+- Nginx: Running (port 5985, SSL) ✅
+- MinIO: Running (port 9000/9001) ✅
+- Login page: HTTP 200 OK qua HTTPS https://lms.phuthaiholdings.com:5985 ✅
+
+**Auto-start tasks (Task Scheduler):**
+- `LMSAutoStart`: `pm2 resurrect` at ONSTART (SYSTEM)
+- `LMSMinIO`: MinIO server at ONSTART (SYSTEM)
+- `NginxAutoStart`: nginx.exe at ONSTART (SYSTEM)
+
+**Lưu ý / Rủi ro:**
+- Redis 5.0.14 (tporadowski) — BullMQ warn "recommend 6.2.0+" nhưng không crash
+- PM2 daemon bị kill khi SSH session đóng → dùng Task Scheduler ONSTART thay vì pm2 startup
+- SYSTEM task không có PATH chuẩn → bat file phải set PATH thủ công
+- `prisma db push` EPERM khi generate DLL (locked bởi lms-web) — OK vì client đã generate rồi
+- FastAPI (ai-service) chưa khởi động — cần setup riêng
+
+---
+
+## [2026-07-06] fix: Course Wizard không đọc được file PDF (lần 2 — native extractor)
+
+**Loại:** fix
+
+**Nguyên nhân:**
+`pdf-parse` v2 đã thay đổi API hoàn toàn: không còn là function, không nhận Buffer, chỉ nhận URL. Next.js bundler wrap module thành `{ default: ... }` nhưng `default` không phải function → `TypeError: (0, a.default) is not a function`
+
+**Các thay đổi:**
+- `src/app/api/wizard/extract-text/route.ts`: Bỏ hoàn toàn `pdf-parse` và `pdfjs-dist`. Thay bằng extractor thuần Node.js built-in:
+  - Tìm tất cả PDF content streams (`stream...endstream`)
+  - Phát hiện FlateDecode → decompress bằng `inflateSync` (zlib built-in)
+  - Parse BT/ET blocks → extract Tj/TJ operators
+  - Hỗ trợ cả literal strings `(text)` và hex strings `<hex>` (UTF-16 và latin1)
+  - Không dependency ngoài nào cần thêm
+
+**Kết quả:**
+- Build thành công, pm2 restart lms-web → online
+- Extractor hoạt động không cần worker, không cần external module
+- Tương thích với hầu hết PDF văn bản thông thường (Word export, LibreOffice, PDF printer)
+
+**Lưu ý / Rủi ro:**
+- PDF scan (hình ảnh thuần) sẽ trả về text rỗng → báo lỗi "Không có nội dung text"
+- PDF có font encoding phức tạp (Type3, CIDFont custom) có thể bị mất text
+
+---
+
+## [2026-07-06] fix: Course Wizard không đọc được file PDF
+
+**Loại:** fix
+
+**Nguyên nhân:**
+`/api/wizard/extract-text` dùng `pdfjs-dist/legacy/build/pdf.mjs` để đọc PDF nhưng thư viện này yêu cầu `GlobalWorkerOptions.workerSrc` được set — không hoạt động trong môi trường Next.js API Route (Node.js). Lỗi: `"No 'GlobalWorkerOptions.workerSrc' specified."`
+
+**Các thay đổi:**
+- `src/app/api/wizard/extract-text/route.ts`: Thay toàn bộ `extractPdfText` từ `pdfjs-dist` (cần worker) sang `pdf-parse` (đã cài sẵn v2.4.5, native Node.js, không cần worker, 3 dòng thay vì 30 dòng)
+
+**Kết quả:**
+- Build thành công, pm2 restart lms-web → online
+- PDF trong Course Wizard sẽ được trích xuất text thành công
+
+**Lưu ý / Rủi ro:**
+- `pdfjs-dist` không bị xóa khỏi `package.json` (vẫn có thể dùng ở nơi khác)
+- `pdf-parse` đọc được hầu hết PDF thông thường; PDF được scan (hình ảnh thuần) sẽ trả về text rỗng
+
+---
+
+## [2026-07-06 ~now] fix: PDF upload thất bại trên Windows Server 2016
+
+**Loại:** fix
+
+**Nguyên nhân:**
+Trên Windows Server 2016, MIME type `application/pdf` không được đăng ký trong registry, dẫn đến `file.type === ''` khi user chọn file PDF qua `<input type="file">`. Điều này gây ra:
+- `Content-Type: ''` header khi PUT lên MinIO → MinIO từ chối hoặc lưu sai metadata
+- `mimeType: ''` gửi lên `/api/assets` → không map được extension `.pdf` → file lưu sai tên
+
+**Các thay đổi:**
+- `src/app/(dashboard)/media-library/page.tsx`: Thêm helper `getMimeFromExtension(filename)` mapping ext → MIME; cập nhật `detectFileType` dùng extension làm fallback; thêm fallback `file.type || getMimeFromExtension(file.name)` cho `Content-Type` header và trường `mimeType` trong confirm request
+- `src/app/(dashboard)/courses/[id]/lessons/[lessonId]/content/page.tsx`: Tương tự — thêm `getMimeFromExtension`, cập nhật `detectFileType`, thay `'application/octet-stream'` fallback bằng `getMimeFromExtension(file.name)` cho cả `Content-Type` header và `mimeType`
+
+**Kết quả:**
+- Build thành công, pm2 restart lms-web → online
+- PDF và các loại tài liệu Office sẽ được upload đúng MIME type ngay cả khi Windows không nhận diện được
+
+**Lưu ý / Rủi ro:**
+- Không có breaking change
+- Fallback cuối là `'application/octet-stream'` cho các extension không có trong map
+
 ## [2026-07-06 11:30] feat: Hoàn thiện hệ thống Restore — fix bugs + BullMQ + progress polling + company filter
 
 **Loại:** feature + fix
@@ -66,6 +308,42 @@
 **Lưu ý / Rủi ro:**
 - LOCAL backup không bảo vệ khỏi hỏng ổ đĩa server — nên dùng kết hợp với remote destination
 - Đường dẫn mặc định nếu để trống: `{project_root}/backups`
+
+---
+
+## [2026-07-06 12:30] deploy: PHASE 0 — Infrastructure Setup server 10.191.36.72
+
+**Loại:** deploy
+
+**Các thay đổi:**
+- Cài Chocolatey 2.7.3 (qua PowerShell)
+- Cài Node.js v20.19.2 LTS (MSI installer trực tiếp — Choco cần .NET 4.8)
+- Cài Git 2.47.1 (MSI installer trực tiếp)
+- Cài Python 3.11.9 (MSI installer trực tiếp)
+- Cài PM2 7.0.3 + pm2-windows-startup (via npm global)
+- Cài Redis 3.2.100 (zip extract → C:\Redis, chạy như service)
+- PostgreSQL 15.6 đã có tại D:\PostgreSQL — reset password postgres → Pthg@2026
+- Tạo database `lms_production`, user `lms_user` / `lms@2026`
+- Cài Nginx 1.26.0 tại C:\nginx, cấu hình SSL port 5985
+- Copy SSL cert wildcard *.phuthaiholdings.com (Sectigo, hết hạn 16/01/2027)
+- Dời WinRM từ port 5985 sang 5986 (giải phóng 5985 cho nginx)
+- Tạo junction D:\LMSPTHG -> D:\LMS PTHG (tránh space trong nginx alias)
+- Tạo cấu trúc thư mục D:\LMS PTHG: logs, uploads, backups, minio-data
+- Download minio.exe (~108MB) vào D:\LMS PTHG\minio.exe
+
+**Kết quả:**
+- Node.js v20.19.2 ✅ | npm 10.8.2 ✅ | Git 2.47.1 ✅ | Python 3.11.9 ✅
+- PM2 7.0.3 ✅ | PostgreSQL 15.6 ✅ (port 5432) | Redis PONG ✅ (127.0.0.1:6379)
+- Nginx 1.26.0 ✅ (port 5985 SSL) | MinIO installed ✅ | Chocolatey 2.7.3 ✅
+- SSL cert: CN=*.phuthaiholdings.com, notAfter=Jan 16 23:59:59 2027 GMT
+
+**Lưu ý / Rủi ro:**
+- .NET 4.8 chưa cài (Choco cài packages cần .NET 4.8 — dùng installer trực tiếp thay thế)
+- WinRM HTTP đã dời sang port 5986 — cần cập nhật firewall rule nếu dùng WinRM
+- Nginx chưa cấu hình auto-start khi server reboot — cần dùng WinSW hoặc sc create
+- MinIO chưa cấu hình service — cần cấu hình trước khi deploy app
+- PostgreSQL service: `postgresql` — chạy tự động theo Windows service
+- Redis chạy như service `Redis` — tự động start
 
 ---
 

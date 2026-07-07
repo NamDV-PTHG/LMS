@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/components/providers/auth-provider';
 import { useToast } from '@/components/ui/toast';
-import Link from 'next/link';
+import { AdminDataTable, ActionBtn } from '@/components/admin/AdminDataTable';
+import { StatusBadge } from '@/components/admin/StatusBadge';
 
 interface Group {
   id: string;
@@ -14,18 +16,6 @@ interface Group {
   createdAt: string;
   _count: { members: number; courses: number };
 }
-
-const TYPE_LABELS: Record<Group['type'], string> = {
-  manual: 'Thủ công',
-  rule_based: 'Rule-based',
-  external: 'Ngoài hệ thống',
-};
-
-const TYPE_COLORS: Record<Group['type'], string> = {
-  manual: 'bg-blue-100 text-blue-700',
-  rule_based: 'bg-purple-100 text-purple-700',
-  external: 'bg-orange-100 text-orange-700',
-};
 
 export default function LearningGroupsPage() {
   const { accessToken } = useAuth();
@@ -83,20 +73,7 @@ export default function LearningGroupsPage() {
   if (isLoading) return <div className="p-8 text-center text-muted-foreground">Đang tải...</div>;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Learning Groups</h1>
-          <p className="text-sm text-muted-foreground mt-1">Nhóm học xuyên công ty</p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-        >
-          + Tạo nhóm
-        </button>
-      </div>
-
+    <div className="max-w-5xl mx-auto space-y-4">
       {/* Create modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
@@ -147,33 +124,59 @@ export default function LearningGroupsPage() {
         </div>
       )}
 
-      {groups.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">Chưa có nhóm học nào</div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {groups.map((g) => (
-            <Link
-              key={g.id}
-              href={`/learning-groups/${g.id}`}
-              className="block border rounded-xl p-5 hover:shadow-md transition-shadow bg-white"
-            >
-              <div className="flex items-start justify-between mb-2">
-                <h3 className="font-semibold text-gray-900">{g.name}</h3>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${TYPE_COLORS[g.type]}`}>
-                  {TYPE_LABELS[g.type]}
-                </span>
+      <AdminDataTable
+        title="Learning Groups"
+        description="Nhóm học xuyên công ty"
+        primaryAction={{ label: '+ Tạo nhóm', onClick: () => setShowCreate(true) }}
+        rows={groups}
+        rowKey={(g) => g.id}
+        emptyState="Chưa có nhóm học nào"
+        columns={[
+          {
+            key: 'name',
+            header: 'Tên nhóm',
+            render: (g) => (
+              <div>
+                <span className="font-medium">{g.name}</span>
+                {g.description && (
+                  <div className="text-subtle text-[12px] line-clamp-1 mt-0.5">{g.description}</div>
+                )}
               </div>
-              {g.description && (
-                <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{g.description}</p>
-              )}
-              <div className="flex gap-4 text-xs text-gray-500">
-                <span>{g._count.members} thành viên</span>
-                <span>{g._count.courses} khóa học</span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+            ),
+          },
+          {
+            key: 'type',
+            header: 'Loại',
+            render: (g) => {
+              if (g.type === 'rule_based') return <StatusBadge label="Rule-based" variant="info-purple" />;
+              if (g.type === 'external') return <StatusBadge label="Ngoài hệ thống" variant="warning" />;
+              return <StatusBadge label="Thủ công" variant="info-blue" />;
+            },
+          },
+          {
+            key: 'members',
+            header: 'Thành viên',
+            align: 'right',
+            render: (g) => g._count.members,
+          },
+          {
+            key: 'courses',
+            header: 'Khóa học',
+            align: 'right',
+            render: (g) => g._count.courses,
+          },
+          {
+            key: 'actions',
+            header: 'Thao tác',
+            align: 'right',
+            render: (g) => (
+              <Link href={`/learning-groups/${g.id}`}>
+                <ActionBtn label="Quản lý" onClick={() => {}} variant="blue" />
+              </Link>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -28,7 +28,17 @@ export async function sendWelcomeEmail(
   fullName: string,
   password: string,
   loginUrl: string,
+  appUrl?: string,
 ): Promise<SendResult> {
+  const appSection = appUrl ? `
+    <div style="background:#f0f7ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px;margin:16px 0">
+      <p style="margin:0 0 6px;color:#1e40af;font-size:13px;font-weight:600">📱 Ứng dụng di động (PWA)</p>
+      <p style="margin:0 0 10px;color:#374151;font-size:13px">Bạn cũng có thể học mọi lúc mọi nơi qua ứng dụng trên điện thoại:</p>
+      <a href="${appUrl}" style="display:inline-block;padding:10px 20px;background:#1a56db;color:#fff;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600">Mở ứng dụng</a>
+      <p style="margin:8px 0 0;color:#6b7280;font-size:12px">Hoặc truy cập: <a href="${appUrl}" style="color:#1a56db">${appUrl}</a></p>
+      <p style="margin:6px 0 0;color:#6b7280;font-size:12px">💡 Thêm vào màn hình chính điện thoại để trải nghiệm như app native.</p>
+    </div>` : '';
+
   const html = `
 <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;background:#f9fafb;padding:24px;border-radius:12px">
   <div style="background:#1a56db;padding:20px 24px;border-radius:8px 8px 0 0">
@@ -38,7 +48,7 @@ export async function sendWelcomeEmail(
     <p style="color:#374151;font-size:15px">Xin chào <strong>${fullName}</strong>,</p>
     <p style="color:#374151;font-size:15px">Tài khoản LMS của bạn đã được tạo. Dưới đây là thông tin đăng nhập:</p>
     <div style="background:#f3f4f6;border-radius:8px;padding:16px;margin:16px 0">
-      <p style="margin:0 0 8px;color:#6b7280;font-size:13px">Trang đăng nhập:</p>
+      <p style="margin:0 0 8px;color:#6b7280;font-size:13px">Trang đăng nhập (máy tính):</p>
       <p style="margin:0 0 16px"><a href="${loginUrl}" style="color:#1a56db">${loginUrl}</a></p>
       <p style="margin:0 0 8px;color:#6b7280;font-size:13px">Email:</p>
       <p style="margin:0 0 16px;font-weight:600;color:#111827">${to}</p>
@@ -47,6 +57,7 @@ export async function sendWelcomeEmail(
     </div>
     <p style="color:#ef4444;font-size:13px">⚠ Vui lòng đổi mật khẩu ngay sau khi đăng nhập lần đầu.</p>
     <a href="${loginUrl}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#1a56db;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">Đăng nhập ngay</a>
+    ${appSection}
   </div>
   <p style="color:#9ca3af;font-size:12px;text-align:center;margin-top:16px">Email này được gửi tự động từ hệ thống LMS Tập đoàn.</p>
 </div>`;

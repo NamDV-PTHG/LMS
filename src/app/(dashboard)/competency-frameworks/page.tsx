@@ -1,8 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/components/providers/auth-provider';
 import useSWR from 'swr';
+import { AdminDataTable, ActionBtn } from '@/components/admin/AdminDataTable';
+import { StatusBadge } from '@/components/admin/StatusBadge';
 
 const fetcher = (url: string, token: string) =>
   fetch(url, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
@@ -62,18 +65,7 @@ export default function CompetencyFrameworksPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Khung năng lực</h1>
-          <p className="text-sm text-muted-foreground mt-1">Quản lý các khung năng lực theo vị trí công việc</p>
-        </div>
-        <button onClick={() => setShowCreate(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
-          + Tạo khung mới
-        </button>
-      </div>
-
+    <div className="max-w-5xl mx-auto space-y-4">
       {/* Create modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -107,56 +99,73 @@ export default function CompetencyFrameworksPage() {
         </div>
       )}
 
-      {/* Framework list */}
-      <div className="grid gap-4">
-        {frameworks.map((fw) => (
-          <div key={fw.id} className="border rounded-xl p-5 space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold">{fw.name}</h3>
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">v{fw.version}</span>
-                  {fw.publishedAt ? (
-                    <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Đã xuất bản</span>
-                  ) : (
-                    <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">Nháp</span>
-                  )}
-                  {!fw.isActive && (
-                    <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Không hoạt động</span>
-                  )}
-                </div>
-                {fw.description && <p className="text-sm text-muted-foreground mt-1">{fw.description}</p>}
-                <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
-                  <span>{fw._count.domains} lĩnh vực</span>
-                  <span>{fw._count.positions} vị trí sử dụng</span>
-                </div>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                {!fw.publishedAt && (
-                  <button onClick={() => handlePublish(fw)}
-                    className="text-xs px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700">
-                    Xuất bản
-                  </button>
+      <AdminDataTable
+        title="Khung năng lực"
+        description="Quản lý các khung năng lực theo vị trí công việc"
+        primaryAction={{ label: '+ Tạo khung mới', onClick: () => setShowCreate(true) }}
+        rows={frameworks}
+        rowKey={(fw) => fw.id}
+        emptyState="Chưa có khung năng lực nào. Tạo mới để bắt đầu."
+        columns={[
+          {
+            key: 'name',
+            header: 'Tên khung',
+            render: (fw) => (
+              <div>
+                <span className="font-medium">{fw.name}</span>
+                {fw.description && (
+                  <div className="text-subtle text-[12px] line-clamp-1 mt-0.5">{fw.description}</div>
                 )}
-                <button onClick={() => handleToggleActive(fw)}
-                  className="text-xs px-3 py-1.5 border rounded hover:bg-gray-50">
-                  {fw.isActive ? 'Ẩn' : 'Kích hoạt'}
-                </button>
-                <a href={`/competency-frameworks/${fw.id}`}
-                  className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">
-                  Chỉnh sửa →
-                </a>
               </div>
-            </div>
-          </div>
-        ))}
-        {frameworks.length === 0 && !data && (
-          <div className="text-center py-12 text-muted-foreground">Đang tải...</div>
-        )}
-        {frameworks.length === 0 && data && (
-          <div className="text-center py-12 text-muted-foreground">Chưa có khung năng lực nào. Tạo mới để bắt đầu.</div>
-        )}
-      </div>
+            ),
+          },
+          {
+            key: 'version',
+            header: 'Phiên bản',
+            render: (fw) => <span className="text-subtle">v{fw.version}</span>,
+          },
+          {
+            key: 'status',
+            header: 'Trạng thái',
+            render: (fw) =>
+              fw.publishedAt
+                ? <StatusBadge label="Đã xuất bản" variant="success" />
+                : <StatusBadge label="Bản nháp" variant="warning" />,
+          },
+          {
+            key: 'domains',
+            header: 'Lĩnh vực',
+            align: 'right',
+            render: (fw) => fw._count.domains,
+          },
+          {
+            key: 'positions',
+            header: 'Vị trí sử dụng',
+            align: 'right',
+            render: (fw) => fw._count.positions,
+          },
+          {
+            key: 'actions',
+            header: 'Thao tác',
+            align: 'right',
+            render: (fw) => (
+              <div className="flex gap-1.5 justify-end">
+                {!fw.publishedAt && (
+                  <ActionBtn label="Xuất bản" onClick={() => handlePublish(fw)} variant="blue" />
+                )}
+                <ActionBtn
+                  label={fw.isActive ? 'Ẩn' : 'Kích hoạt'}
+                  onClick={() => handleToggleActive(fw)}
+                  variant="gray"
+                />
+                <Link href={`/competency-frameworks/${fw.id}`}>
+                  <ActionBtn label="Chỉnh sửa" onClick={() => {}} variant="blue" />
+                </Link>
+              </div>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

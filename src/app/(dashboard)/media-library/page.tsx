@@ -47,6 +47,30 @@ interface DownloadPermission {
 
 // ── Helpers ───────────────────────────────────────────────────
 
+/** Fallback MIME type from file extension — needed on Windows where file.type may be empty */
+function getMimeFromExtension(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  const map: Record<string, string> = {
+    pdf:  'application/pdf',
+    doc:  'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls:  'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt:  'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    mp4:  'video/mp4',
+    webm: 'video/webm',
+    mp3:  'audio/mpeg',
+    wav:  'audio/wav',
+    jpg:  'image/jpeg',
+    jpeg: 'image/jpeg',
+    png:  'image/png',
+    gif:  'image/gif',
+    webp: 'image/webp',
+  };
+  return map[ext] ?? 'application/octet-stream';
+}
+
 function formatBytes(bytes: string): string {
   const b = parseInt(bytes, 10);
   if (b < 1024) return `${b} B`;
@@ -301,10 +325,12 @@ function UploadModal({ selectedFolderId, accessToken, onClose, onSuccess }: Uplo
   const ACCEPT = '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.mp4,.mp3,.jpg,.jpeg,.png,.gif,.webp';
 
   function detectFileType(f: File): string {
-    if (f.type.startsWith('video/')) return 'video';
-    if (f.type.startsWith('audio/')) return 'audio';
-    if (f.type.startsWith('image/')) return 'image';
-    if (f.type.includes('presentation') || f.name.endsWith('.pptx') || f.name.endsWith('.ppt')) return 'presentation';
+    const ext = f.name.split('.').pop()?.toLowerCase() ?? '';
+    const mime = f.type || getMimeFromExtension(f.name);
+    if (mime.startsWith('video/') || ['mp4','webm','mov','avi'].includes(ext)) return 'video';
+    if (mime.startsWith('audio/') || ['mp3','wav','ogg','m4a'].includes(ext)) return 'audio';
+    if (mime.startsWith('image/') || ['jpg','jpeg','png','gif','webp'].includes(ext)) return 'image';
+    if (mime.includes('presentation') || ['pptx','ppt'].includes(ext)) return 'presentation';
     return 'document';
   }
 
@@ -329,7 +355,7 @@ function UploadModal({ selectedFolderId, accessToken, onClose, onSuccess }: Uplo
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('PUT', uploadUrl);
-        xhr.setRequestHeader('Content-Type', file.type);
+        xhr.setRequestHeader('Content-Type', file.type || getMimeFromExtension(file.name));
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 90));
         };
@@ -353,7 +379,7 @@ function UploadModal({ selectedFolderId, accessToken, onClose, onSuccess }: Uplo
           title: title.trim(),
           description: description.trim() || undefined,
           fileType: detectFileType(file),
-          mimeType: file.type,
+          mimeType: file.type || getMimeFromExtension(file.name),
           fileSizeBytes: file.size,
           tempObjectName,
         }),

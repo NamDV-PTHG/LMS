@@ -389,6 +389,7 @@ enum EnrollmentSource {
   learning_group
   company_assign
   self
+  learning_path
 }
 
 model LessonProgress {

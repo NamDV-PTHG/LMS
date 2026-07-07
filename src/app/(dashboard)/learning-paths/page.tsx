@@ -1,8 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/components/providers/auth-provider';
 import useSWR from 'swr';
+import { AdminDataTable, ActionBtn } from '@/components/admin/AdminDataTable';
+import { StatusBadge } from '@/components/admin/StatusBadge';
 
 const fetcher = (url: string, token: string) =>
   fetch(url, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
@@ -57,23 +60,12 @@ export default function LearningPathsPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Lộ trình học tập</h1>
-          <p className="text-sm text-muted-foreground mt-1">Xây dựng lộ trình học cho từng vị trí công việc</p>
-        </div>
-        <button onClick={() => setShowCreate(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
-          + Tạo lộ trình mới
-        </button>
-      </div>
-
+    <div className="max-w-5xl mx-auto space-y-4">
       {/* Create modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl space-y-4">
-            <h2 className="font-semibold text-lg">Tạo lộ trình mới</h2>
+            <h2 className="font-medium text-lg">Tạo lộ trình mới</h2>
             <div className="space-y-3">
               <div>
                 <label className="text-sm font-medium block mb-1">Tên lộ trình *</label>
@@ -103,49 +95,79 @@ export default function LearningPathsPage() {
         </div>
       )}
 
-      {/* List */}
-      <div className="grid gap-4">
-        {paths.map((lp) => (
-          <div key={lp.id} className="border rounded-xl p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="font-semibold">{lp.name}</h3>
-                  {!lp.isActive && (
-                    <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Ẩn</span>
-                  )}
-                  {lp.totalDeadlineDays && (
-                    <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">
-                      Hạn {lp.totalDeadlineDays} ngày
-                    </span>
-                  )}
-                </div>
-                {lp.description && <p className="text-sm text-muted-foreground mt-1">{lp.description}</p>}
-                <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
-                  <span>{lp._count.steps} bước học</span>
-                  <span>{lp._count.enrollments} học viên</span>
-                  {lp.positions.length > 0 && (
-                    <span>Gắn với: {lp.positions.map((p) => p.title).join(', ')}</span>
-                  )}
-                </div>
+      <AdminDataTable
+        title="Lộ trình học tập"
+        description="Xây dựng lộ trình học cho từng vị trí công việc"
+        primaryAction={{ label: '+ Tạo lộ trình mới', onClick: () => setShowCreate(true) }}
+        rows={paths}
+        rowKey={(lp) => lp.id}
+        emptyState="Chưa có lộ trình nào. Tạo mới để bắt đầu."
+        columns={[
+          {
+            key: 'name',
+            header: 'Tên lộ trình',
+            render: (lp) => (
+              <div>
+                <span className="font-medium">{lp.name}</span>
+                {lp.totalDeadlineDays && (
+                  <span className="ml-1.5 text-faint text-[11px]">(Hạn {lp.totalDeadlineDays}d)</span>
+                )}
+                {lp.description && (
+                  <div className="text-subtle text-[12px] mt-0.5">{lp.description}</div>
+                )}
               </div>
-              <div className="flex gap-2 shrink-0">
-                <button onClick={() => handleToggleActive(lp)}
-                  className="text-xs px-3 py-1.5 border rounded hover:bg-gray-50">
-                  {lp.isActive ? 'Ẩn' : 'Kích hoạt'}
-                </button>
-                <a href={`/learning-paths/${lp.id}`}
-                  className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">
-                  Xây dựng →
-                </a>
-              </div>
-            </div>
-          </div>
-        ))}
-        {paths.length === 0 && data && (
-          <div className="text-center py-12 text-muted-foreground">Chưa có lộ trình nào. Tạo mới để bắt đầu.</div>
-        )}
-      </div>
+            ),
+          },
+          {
+            key: 'status',
+            header: 'Trạng thái',
+            render: (lp) =>
+              lp._count.enrollments > 0
+                ? <StatusBadge label="Đang mở" variant="success" />
+                : <StatusBadge label="Chưa có học viên" variant="warning" />,
+          },
+          {
+            key: 'steps',
+            header: 'Bước học',
+            align: 'right',
+            render: (lp) => lp._count.steps,
+          },
+          {
+            key: 'enrollments',
+            header: 'Học viên',
+            align: 'right',
+            render: (lp) => lp._count.enrollments,
+          },
+          {
+            key: 'deadline',
+            header: 'Hạn',
+            align: 'center',
+            render: (lp) =>
+              lp.totalDeadlineDays
+                ? <span className="text-[12px] text-warning font-medium">{lp.totalDeadlineDays} ngày</span>
+                : <span className="text-faint">—</span>,
+          },
+          {
+            key: 'toggle',
+            header: 'Hiển thị',
+            align: 'center',
+            render: (lp) =>
+              lp.isActive
+                ? <ActionBtn label="Ẩn" onClick={() => handleToggleActive(lp)} variant="gray" />
+                : <ActionBtn label="Kích hoạt" onClick={() => handleToggleActive(lp)} variant="blue" />,
+          },
+          {
+            key: 'actions',
+            header: 'Thao tác',
+            align: 'right',
+            render: (lp) => (
+              <Link href={`/learning-paths/${lp.id}`}>
+                <ActionBtn label="Xây dựng" onClick={() => {}} variant="blue" />
+              </Link>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

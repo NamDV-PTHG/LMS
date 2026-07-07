@@ -62,7 +62,7 @@ export function ContinueCard({ course }: { course: CourseCardData }) {
           <div className="space-y-1">
             <ProgressBar value={progress} thick />
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-faint">{progress}% hoàn thành</span>
+              <span className="text-[10px] text-faint">{Math.round(progress)}% hoàn thành</span>
               {course.estimatedHours && (
                 <span className="text-[10px] text-faint flex items-center gap-0.5">
                   <Clock size={10} />
@@ -108,7 +108,7 @@ export function CourseListItem({ course }: { course: CourseCardData }) {
           </h3>
           <ProgressBar value={progress} />
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-faint">{progress}%</span>
+            <span className="text-[10px] text-faint">{Math.round(progress)}%</span>
             {isCompleted ? (
               <span className="bg-success-tint text-success text-[10px] font-medium
                                rounded-full px-2 py-0.5">

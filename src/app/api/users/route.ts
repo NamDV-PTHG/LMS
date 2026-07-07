@@ -39,8 +39,8 @@ export const POST = withRole(
 
       // Gửi email chào mừng nếu được yêu cầu (không block response nếu fail)
       if (body.sendWelcomeEmail) {
-        const loginUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://lms.phuthaiholdings.com:5980';
-        sendWelcomeEmail(newUser.email, newUser.fullName, plainPassword, `${loginUrl}/login`)
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://lms.phuthaiholdings.com:5980';
+        sendWelcomeEmail(newUser.email, newUser.fullName, plainPassword, `${baseUrl}/login`, `${baseUrl}/app`)
           .catch((e) => console.error('[Email] Gửi welcome email thất bại:', e));
       }
 

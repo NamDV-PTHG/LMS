@@ -141,7 +141,7 @@ export default function MyCourseDetailPage() {
       <div className="bg-surface border border-default rounded-xl shadow-card p-4 space-y-2">
         <div className="flex items-center justify-between text-[12px]">
           <span className="text-content font-medium">Tiến độ học tập</span>
-          <span className="text-primary font-medium">{course.progressPercent ?? 0}%</span>
+          <span className="text-primary font-medium">{Math.round(course.progressPercent ?? 0)}%</span>
         </div>
         <div className="h-2 bg-muted rounded-full overflow-hidden">
           <div

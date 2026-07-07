@@ -120,7 +120,7 @@ export default function MyCoursesPage() {
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-subtle">
                 <span>Tiến độ</span>
-                <span>{course.progressPercent ?? 0}%</span>
+                <span>{Math.round(course.progressPercent ?? 0)}%</span>
               </div>
               <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                 <div

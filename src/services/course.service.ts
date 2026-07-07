@@ -29,7 +29,7 @@ export const createSectionSchema = z.object({
 export const createLessonSchema = z.object({
   title: z.string().min(1).max(200),
   displayOrder: z.number().int().min(1).optional(), // auto-calculated if omitted
-  contentType: z.enum(['video', 'document', 'quiz', 'text', 'presentation', 'audio']),
+  contentType: z.enum(['video', 'document', 'quiz', 'text', 'presentation', 'audio', 'pdf', 'image']),
   estimatedMinutes: z.number().int().positive().optional(),
   requiredMinutes: z.number().int().positive().optional(),
   deadlineOffsetDays: z.number().int().positive().optional(),

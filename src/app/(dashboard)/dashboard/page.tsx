@@ -131,6 +131,7 @@ export default function DashboardPage() {
     { href: '/positions',             label: 'Vị trí công việc',    icon: Users,        roles: ['group_admin', 'group_hrm', 'company_admin'] },
     { href: '/learning-paths',        label: 'Lộ trình học',        icon: Map,          roles: ['group_admin', 'group_hrm', 'company_admin'] },
     { href: '/position-changes',      label: 'Thay đổi vị trí',    icon: ArrowRight,   roles: ['group_admin', 'group_hrm', 'company_admin'] },
+    { href: '/my-courses',             label: 'Khóa học của tôi',   icon: BookOpen,     roles: ['learner'] },
     { href: '/my-learning-paths',     label: 'Lộ trình của tôi',   icon: Map,          roles: ['learner'] },
   ];
 

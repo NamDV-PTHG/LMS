@@ -4,6 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/components/providers/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import useSWR from 'swr';
+import { AdminDataTable, ActionBtn } from '@/components/admin/AdminDataTable';
+import { StatusBadge } from '@/components/admin/StatusBadge';
 
 const fetcher = (url: string, token: string) =>
   fetch(url, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
@@ -210,17 +212,7 @@ export default function PositionsPage() {
   const totalWeight = posFrameworks.reduce((s, pf) => s + pf.weight, 0);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Vị trí công việc</h1>
-          <p className="text-sm text-muted-foreground mt-1">Quản lý vị trí — gắn nhiều khung năng lực với trọng số và lộ trình học riêng</p>
-        </div>
-        <button onClick={openCreate} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
-          + Tạo vị trí mới
-        </button>
-      </div>
-
+    <div className="max-w-5xl mx-auto space-y-4">
       {/* Basic position modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -385,64 +377,72 @@ export default function PositionsPage() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="border rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b">
-            <tr>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Vị trí</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Cấp bậc</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Khung NL</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Nhân viên</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Trạng thái</th>
-              <th className="px-4 py-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {positions.map((pos) => (
-              <tr key={pos.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{pos.title}</span>
-                    {pos.catalogId ? (
-                      <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">✓ DM</span>
-                    ) : (
-                      <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">Tùy chỉnh</span>
-                    )}
-                  </div>
-                  {pos.code && <div className="text-xs text-muted-foreground">{pos.code}</div>}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{pos.level ?? '—'}</td>
-                <td className="px-4 py-3">
-                  {pos.competencyFramework ? (
-                    <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
-                      {pos.competencyFramework.name}
-                    </span>
-                  ) : <span className="text-muted-foreground text-xs">—</span>}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{pos._count.users}</td>
-                <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${pos.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {pos.isActive ? 'Hoạt động' : 'Ẩn'}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-2">
-                    <button onClick={() => openEdit(pos)} className="text-xs text-blue-500 hover:underline">Sửa</button>
-                    <button onClick={() => openFwModal(pos)} className="text-xs text-purple-500 hover:underline">Khung NL</button>
-                    <button onClick={() => handleToggleActive(pos)} className="text-xs text-gray-500 hover:underline">
-                      {pos.isActive ? 'Ẩn' : 'Hiện'}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {positions.length === 0 && (
-              <tr><td colSpan={6} className="text-center py-10 text-muted-foreground">Chưa có vị trí nào</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <AdminDataTable
+        title="Vị trí công việc"
+        description="Quản lý vị trí — gắn nhiều khung năng lực với trọng số và lộ trình học riêng"
+        primaryAction={{ label: '+ Tạo vị trí mới', onClick: openCreate }}
+        rows={positions}
+        rowKey={(pos) => pos.id}
+        emptyState="Chưa có vị trí nào"
+        columns={[
+          {
+            key: 'title',
+            header: 'Vị trí',
+            render: (pos) => (
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium">{pos.title}</span>
+                  {!pos.catalogId && <StatusBadge label="Tùy chỉnh" variant="neutral" />}
+                </div>
+                {pos.code && <div className="text-[11px] text-faint mt-0.5">{pos.code}</div>}
+              </div>
+            ),
+          },
+          {
+            key: 'level',
+            header: 'Cấp bậc',
+            render: (pos) => pos.level ?? <span className="text-faint">—</span>,
+          },
+          {
+            key: 'framework',
+            header: 'Khung NL',
+            render: (pos) =>
+              pos.competencyFramework
+                ? <span className="text-[12px] text-[#3C3489]">{pos.competencyFramework.name}</span>
+                : <span className="text-faint">—</span>,
+          },
+          {
+            key: 'users',
+            header: 'Nhân viên',
+            align: 'right',
+            render: (pos) => pos._count.users,
+          },
+          {
+            key: 'status',
+            header: 'Trạng thái',
+            render: (pos) =>
+              pos.isActive
+                ? <StatusBadge label="Hoạt động" variant="success" />
+                : <StatusBadge label="Ẩn" variant="neutral" />,
+          },
+          {
+            key: 'actions',
+            header: 'Thao tác',
+            align: 'right',
+            render: (pos) => (
+              <div className="flex gap-1.5 justify-end">
+                <ActionBtn label="Sửa" onClick={() => openEdit(pos)} variant="blue" />
+                <ActionBtn label="Khung NL" onClick={() => openFwModal(pos)} variant="purple" />
+                <ActionBtn
+                  label={pos.isActive ? 'Ẩn' : 'Hiện'}
+                  onClick={() => handleToggleActive(pos)}
+                  variant="gray"
+                />
+              </div>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }
