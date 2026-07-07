@@ -3,6 +3,43 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-07 19:35] Docs: Hoàn thiện tài liệu hướng dẫn 3 vai trò — có ảnh thực tế
+
+**Loại:** docs
+
+**Các thay đổi:**
+- Chụp ~48 screenshot thực tế từ hệ thống đang chạy qua Puppeteer headless Chrome (Admin@123)
+- Nhúng ảnh vào 3 file Markdown: Admin (27 ảnh), Giảng viên (28 ảnh), Học viên (30 ảnh)
+- Sinh 3 PDF có ảnh: HUONG_DAN_ADMIN_CONG_TY.pdf (2.6MB), HUONG_DAN_GIANG_VIEN.pdf (2.6MB), HUONG_DAN_HOC_VIEN.pdf (2.0MB)
+- Thêm scripts: capture-screenshots-{2,3,4}.mjs, generate-pdf-docs.mjs
+
+**Kết quả:**
+- 3 file PDF sẵn sàng phát hành tại project root
+- Push thành công lên master (commit c418d0a)
+
+**Lưu ý / Rủi ro:**
+- Mật khẩu test accounts: group_admin@via.vn / instructor@via.vn / nam.dv@phuthaiholdings.com → Admin@123
+- Một số ảnh dùng chung placeholder (operations-backup.png hiển thị tab hệ thống, không phải tab sao lưu)
+
+## [2026-07-07 14:05] Fix: Sidebar hiển thị sau khi build đúng path — production
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `D:\LMS PTHG\components\web\web-shell.tsx` (ROOT level) — viết đúng nội dung mới có Sidebar + `flex h-screen`
+- `D:\LMS PTHG\components\web\sidebar.tsx` (ROOT level) — copy từ `src/components/web/sidebar.tsx`
+- Root cause: `layout.tsx` import `'../../../components/web/web-shell'` resolve tới ROOT-level `components/web/`, không phải `src/components/web/`; các lần upload trước đều upload sai path
+
+**Kết quả:**
+- Build sạch (xóa `.next/cache`), chunk mới `layout-cae2f3b4c695235a.js` (16370 chars)
+- `flex h-screen`: FOUND, `w-56`: FOUND, `min-h-screen`: NOT FOUND
+- PM2 resurrect thành công — `lms-web` online (SYSTEM daemon, PM2_HOME=`C:\Users\Administrator\.pm2`)
+- Site trả về login page 200 OK, chunk layout mới được serve
+
+**Lưu ý / Rủi ro:**
+- PM2 daemon nay chạy dưới user SYSTEM (do kill + resurrect qua Task Scheduler). Cả SYSTEM và Administrator đều share cùng PM2_HOME. Nếu server reboot cần `pm2 resurrect` từ Administrator
+- `npm run build` có bug hang sau khi hoàn thành (Redis/DB connections không đóng). Workaround: chạy qua PowerShell `Start-Process` job, detect `First Load JS`, kill process, rồi resurrect PM2
+
 ## [2026-07-07 17:50] Fix: Bổ sung link ứng dụng di động vào email chào mừng tạo tài khoản
 
 **Loại:** fix
