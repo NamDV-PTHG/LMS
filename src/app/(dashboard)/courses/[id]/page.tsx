@@ -115,6 +115,10 @@ export default function CourseEditorPage() {
     dist: Array<{ star: number; count: number }>;
   } | null>(null);
   const [course, setCourse] = useState<Course | null>(null);
+
+  // Khóa học được chia sẻ từ công ty khác → chỉ xem, không sửa
+  const isSharedCourse = !isGroupAdmin && !!course && (course as Course & { ownerCompanyId?: string }).ownerCompanyId !== user?.companyId;
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
@@ -573,9 +577,9 @@ export default function CourseEditorPage() {
                 }}
               />
               <button
-                onClick={() => thumbnailInputRef.current?.click()}
-                disabled={uploadingThumbnail}
-                title="Nhấn để thay đổi ảnh bìa"
+                onClick={() => !isSharedCourse && thumbnailInputRef.current?.click()}
+                disabled={uploadingThumbnail || isSharedCourse}
+                title={isSharedCourse ? 'Không thể chỉnh sửa khóa học được chia sẻ' : 'Nhấn để thay đổi ảnh bìa'}
                 className="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-dashed border-default hover:border-primary transition-colors group bg-gradient-to-br from-muted to-primary-tint flex items-center justify-center"
               >
                 {(course as Course & { thumbnailUrl?: string }).thumbnailUrl ? (
@@ -635,13 +639,15 @@ export default function CourseEditorPage() {
               ) : (
                 <div className="flex items-center gap-2 group">
                   <h1 className="text-[18px] font-medium text-content truncate">{course.title}</h1>
-                  <button
-                    onClick={() => { setEditCourseTitleValue(course.title); setEditingCourseTitle(true); }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-faint hover:text-primary shrink-0"
-                    title="Sửa tiêu đề"
-                  >
-                    ✎
-                  </button>
+                  {!isSharedCourse && (
+                    <button
+                      onClick={() => { setEditCourseTitleValue(course.title); setEditingCourseTitle(true); }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-faint hover:text-primary shrink-0"
+                      title="Sửa tiêu đề"
+                    >
+                      ✎
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -660,7 +666,7 @@ export default function CourseEditorPage() {
           </div>
         </div>
 
-        {!course.isPublished && (
+        {!course.isPublished && !isSharedCourse && (
           <div className="flex flex-col items-end gap-2 shrink-0">
             {readiness && !readiness.isReady && (
               <div className="text-[11px] bg-warning-tint border border-warning/20 text-warning rounded-lg px-3 py-2 max-w-xs text-right space-y-0.5">
@@ -708,7 +714,7 @@ export default function CourseEditorPage() {
         {[
           { key: 'content', label: '📚 Nội dung bài giảng', show: true },
           { key: 'assign',  label: '📤 Phân phối & Giao học', show: true },
-          { key: 'share',   label: '🔗 Chia sẻ với công ty', show: isGroupAdmin || isCompanyAdmin },
+          { key: 'share',   label: '🔗 Chia sẻ với công ty', show: (isGroupAdmin || isCompanyAdmin) && !isSharedCourse },
           { key: 'ratings', label: '⭐ Đánh giá', show: true },
         ].filter((t) => t.show).map((tab) => (
           <button
@@ -728,6 +734,12 @@ export default function CourseEditorPage() {
       {/* ── Tab: Nội dung ── */}
       {activeTab === 'content' && (
         <div className="space-y-3">
+          {isSharedCourse && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-warning-tint border border-warning/30 rounded-lg text-[12px] text-warning">
+              <span>🔒</span>
+              <span>Khóa học được chia sẻ từ <strong>{(course as Course & { ownerCompany?: { name: string } }).ownerCompany?.name ?? 'công ty khác'}</strong> — chỉ xem, không thể chỉnh sửa nội dung.</span>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <h2 className="text-[13px] font-medium text-content">Chương & Bài học ({sections.length} chương)</h2>
             {readiness && readiness.totalLessons > 0 && (
@@ -790,13 +802,15 @@ export default function CourseEditorPage() {
                         <span className="font-medium text-content text-[12px]">{sec.title}</span>
                         <span className="text-faint text-[11px] ml-2 shrink-0">{lessons.length} bài · {isOpen ? '▲' : '▼'}</span>
                       </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setEditSectionValue(sec.title); setEditingSectionId(sec.id); }}
-                        className="ml-3 text-faint hover:text-primary transition-colors shrink-0 text-[12px]"
-                        title="Sửa tên chương"
-                      >
-                        ✎
-                      </button>
+                      {!isSharedCourse && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setEditSectionValue(sec.title); setEditingSectionId(sec.id); }}
+                          className="ml-3 text-faint hover:text-primary transition-colors shrink-0 text-[12px]"
+                          title="Sửa tên chương"
+                        >
+                          ✎
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -853,13 +867,15 @@ export default function CourseEditorPage() {
                                    readinessNotReadyIds.has(lesson.id) ? '✗' : '✓'}
                                 </span>
                               )}
-                              <button
-                                onClick={() => { setEditLessonValue(lesson.title); setEditingLessonId(lesson.id); setEditingLessonSectionId(sec.id); }}
-                                className="opacity-0 group-hover:opacity-100 transition-opacity text-faint hover:text-primary text-[12px] shrink-0"
-                                title="Sửa tên bài học"
-                              >
-                                ✎
-                              </button>
+                              {!isSharedCourse && (
+                                <button
+                                  onClick={() => { setEditLessonValue(lesson.title); setEditingLessonId(lesson.id); setEditingLessonSectionId(sec.id); }}
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity text-faint hover:text-primary text-[12px] shrink-0"
+                                  title="Sửa tên bài học"
+                                >
+                                  ✎
+                                </button>
+                              )}
                             </>
                           )}
 
@@ -868,7 +884,7 @@ export default function CourseEditorPage() {
                               <span className="text-[10px] px-2 py-0.5 rounded bg-muted text-faint shrink-0">
                                 {CONTENT_TYPE_LABEL[lesson.contentType] ?? lesson.contentType}
                               </span>
-                              {lesson.contentType === 'quiz' ? (
+                              {!isSharedCourse && lesson.contentType === 'quiz' ? (
                                 <>
                                   <button
                                     onClick={() => router.push(`/courses/${id}/lessons/${lesson.id}/quiz`)}
@@ -900,21 +916,21 @@ export default function CourseEditorPage() {
                                     Import CSV
                                   </button>
                                 </>
-                              ) : (
+                              ) : !isSharedCourse ? (
                                 <button
                                   onClick={() => router.push(`/courses/${id}/lessons/${lesson.id}/content`)}
                                   className="text-[11px] text-primary hover:text-primary-dark px-2 py-0.5 rounded hover:bg-primary-tint shrink-0 transition-colors"
                                 >
                                   Upload nội dung
                                 </button>
-                              )}
+                              ) : null}
                             </>
                           )}
                         </div>
                       );
                     })}
 
-                    {addingLessonFor === sec.id ? (
+                    {!isSharedCourse && addingLessonFor === sec.id ? (
                       <div className="px-5 py-3 bg-primary-tint border-t border-default space-y-2">
                         <div className="flex items-center gap-2">
                           <input
@@ -952,7 +968,7 @@ export default function CourseEditorPage() {
                         </div>
                         {lessonError && <p className="text-[11px] text-danger">{lessonError}</p>}
                       </div>
-                    ) : (
+                    ) : !isSharedCourse ? (
                       <div className="px-5 py-2 border-t border-default">
                         <button
                           onClick={() => { setAddingLessonFor(sec.id); setNewLessonTitle(''); }}
@@ -961,34 +977,36 @@ export default function CourseEditorPage() {
                           + Thêm bài học
                         </button>
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 )}
               </div>
             );
           })}
 
-          {/* Add section */}
-          <div className="space-y-1 pt-2">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newSectionTitle}
-                onChange={(e) => { setNewSectionTitle(e.target.value); setSectionError(null); }}
-                placeholder="Tên chương mới"
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAddSection(); }}
-                className={inputClass}
-              />
-              <button
-                onClick={handleAddSection}
-                disabled={addingSection || !newSectionTitle.trim()}
-                className="px-4 py-2 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg disabled:opacity-50 transition-colors whitespace-nowrap"
-              >
-                {addingSection ? '...' : '+ Thêm chương'}
-              </button>
+          {/* Add section — ẩn với shared course */}
+          {!isSharedCourse && (
+            <div className="space-y-1 pt-2">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newSectionTitle}
+                  onChange={(e) => { setNewSectionTitle(e.target.value); setSectionError(null); }}
+                  placeholder="Tên chương mới"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddSection(); }}
+                  className={inputClass}
+                />
+                <button
+                  onClick={handleAddSection}
+                  disabled={addingSection || !newSectionTitle.trim()}
+                  className="px-4 py-2 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg disabled:opacity-50 transition-colors whitespace-nowrap"
+                >
+                  {addingSection ? '...' : '+ Thêm chương'}
+                </button>
+              </div>
+              {sectionError && <p className="text-[11px] text-danger px-1">{sectionError}</p>}
             </div>
-            {sectionError && <p className="text-[11px] text-danger px-1">{sectionError}</p>}
-          </div>
+          )}
         </div>
       )}
 

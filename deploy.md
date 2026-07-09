@@ -3,6 +3,22 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-09 11:30] Fix: Khóa học chia sẻ — phân quyền xem/sửa cho admin công ty và HR
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/course.service.ts`: `assertCourseAccess()` cho phép `company_admin` / `hr_manager` xem khóa học được chia sẻ từ công ty khác (tra bảng `CoursePublication`); nếu `requireEdit=true` thì vẫn throw ForbiddenError
+- `src/app/(dashboard)/courses/[id]/page.tsx`: thêm flag `isSharedCourse`; ẩn toàn bộ nút edit (thumbnail, tiêu đề, publish, chia sẻ, thêm chương, thêm bài, sửa section, sửa lesson, upload, quiz); thêm banner cảnh báo "chỉ xem" trong tab Nội dung
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` — status online
+- Admin công ty và HR có thể mở khóa học được chia sẻ, không còn lỗi "Không có quyền truy cập"
+- Toàn bộ nút chỉnh sửa bị ẩn khi khóa học đến từ công ty khác
+
+**Lưu ý / Rủi ro:**
+- `isSharedCourse` chỉ tính cho non-group_admin; group_admin luôn có quyền edit mọi khóa học
+
 ## [2026-07-09 03:00] Config: CI/CD tự động — lịch deploy 3h sáng hàng ngày
 
 **Loại:** config + deploy
@@ -14,7 +30,14 @@
 
 **Kết quả:**
 - Task Scheduler: `Ready`, Next Run: 7/10/2026 3:00:00 AM ✅
-- Test run trigger thành công ✅
+- Test run: DEPLOY SUCCESS — git reset → npm install → build → prisma → pm2 reload → LMS web: 200 ✅
+
+**Chi tiết kỹ thuật đã fix:**
+- Task `/TR` có space trong path → wrapper `C:\lms_deploy.bat` (không space)
+- `git "dubious ownership"` khi chạy Task Scheduler → `git config --global safe.directory "D:/LMS PTHG"`
+- `git stash pop` conflict với ecosystem.config.js → dùng `git reset --hard origin/master` (đã commit lên GitHub)
+- `autoprefixer` thiếu do `npm install --omit=dev` trước đó → dùng `npm install --include=dev`
+- `$ErrorActionPreference = "Stop"` + git stderr → bỏ `2>&1` cho git, dùng `$LASTEXITCODE`
 
 **Lệnh hữu ích:**
 ```powershell

@@ -66,6 +66,19 @@ async function assertCourseAccess(
   if (isGroupAdmin) return course;
 
   if (course.ownerCompanyId !== companyId) {
+    // Khóa học từ công ty khác — cho phép xem nếu đã được chia sẻ (publish) sang công ty này
+    // và user là company_admin hoặc hr_manager (cần xem để giao cho bộ phận/học viên)
+    const isAdminOrHR = roles.some((r) => ['company_admin', 'hr_manager'].includes(r));
+    if (isAdminOrHR) {
+      const publication = await prisma.coursePublication.findUnique({
+        where: { courseId_targetCompanyId: { courseId, targetCompanyId: companyId } },
+        select: { id: true },
+      });
+      if (publication) {
+        if (requireEdit) throw new ForbiddenError('Không thể chỉnh sửa khóa học từ công ty khác');
+        return course;
+      }
+    }
     throw new ForbiddenError('Không có quyền truy cập khóa học này');
   }
 
