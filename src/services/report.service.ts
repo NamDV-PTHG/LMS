@@ -319,6 +319,171 @@ export async function getUserReport(companyId: string, userId: string) {
   };
 }
 
+// ── Hierarchical department reports ───────────────────────────
+
+/**
+ * Returns all org IDs in the sub-tree rooted at orgId (inclusive).
+ */
+export async function getOrgSubtreeIds(orgId: string): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    WITH RECURSIVE sub AS (
+      SELECT id FROM "Organization" WHERE id = ${orgId} AND "isActive" = true
+      UNION ALL
+      SELECT o.id FROM "Organization" o
+      INNER JOIN sub ON o."parentId" = sub.id
+      WHERE o."isActive" = true
+    )
+    SELECT id FROM sub
+  `;
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Returns all org nodes the user manages (has dept_head role in).
+ */
+export async function getManagedOrgs(userId: string) {
+  const roles = await prisma.userRole.findMany({
+    where: { userId, role: 'dept_head' },
+    include: {
+      organization: { select: { id: true, name: true, type: true, parentId: true } },
+    },
+  });
+  return roles.map((r) => r.organization);
+}
+
+/**
+ * Aggregate stats for direct children of an org node.
+ * Used for the drill-down view: Director sees depts, Dept Head sees teams.
+ */
+export async function getDeptChildrenStats(orgId: string) {
+  const children = await prisma.organization.findMany({
+    where: { parentId: orgId, isActive: true },
+    select: { id: true, name: true, type: true },
+    orderBy: { displayOrder: 'asc' },
+  });
+
+  const results = await Promise.all(
+    children.map(async (child) => {
+      const subTreeIds = await getOrgSubtreeIds(child.id);
+
+      const [memberCount, enrolled, completed, leader] = await Promise.all([
+        prisma.userRole
+          .groupBy({ by: ['userId'], where: { organizationId: { in: subTreeIds } } })
+          .then((g) => g.length),
+
+        prisma.enrollment.count({
+          where: { user: { roles: { some: { organizationId: { in: subTreeIds } } } } },
+        }),
+
+        prisma.enrollment.count({
+          where: {
+            completedAt: { not: null },
+            user: { roles: { some: { organizationId: { in: subTreeIds } } } },
+          },
+        }),
+
+        // Leader = first user with dept_head role in this specific child org
+        prisma.userRole.findFirst({
+          where: { organizationId: child.id, role: 'dept_head' },
+          include: { user: { select: { id: true, fullName: true, jobTitle: true } } },
+        }),
+      ]);
+
+      // Average progress across all active enrollments in sub-tree
+      const progresses = await prisma.lessonProgress.findMany({
+        where: {
+          enrollment: {
+            user: { roles: { some: { organizationId: { in: subTreeIds } } } },
+          },
+        },
+        select: { progressPct: true },
+      });
+      const avgProgress =
+        progresses.length > 0
+          ? Math.round(progresses.reduce((s, p) => s + p.progressPct, 0) / progresses.length)
+          : 0;
+
+      const hasChildren = await prisma.organization.count({
+        where: { parentId: child.id, isActive: true },
+      });
+
+      return {
+        orgId: child.id,
+        orgName: child.name,
+        orgType: child.type,
+        hasChildren: hasChildren > 0,
+        leader: leader ? { id: leader.user.id, fullName: leader.user.fullName, jobTitle: leader.user.jobTitle } : null,
+        memberCount,
+        enrolled,
+        completed,
+        completionRate: enrolled > 0 ? Math.round((completed / enrolled) * 100) : 0,
+        avgProgress,
+      };
+    }),
+  );
+
+  return results;
+}
+
+/**
+ * Flat list of all employees in the sub-tree of orgId.
+ * Used for the "Xem tất cả nhân viên" view.
+ */
+export async function getDeptEmployees(orgId: string) {
+  const subTreeIds = await getOrgSubtreeIds(orgId);
+
+  const users = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      roles: { some: { organizationId: { in: subTreeIds } } },
+    },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      employeeCode: true,
+      jobTitle: true,
+      jobPosition: { select: { title: true } },
+    },
+    orderBy: { fullName: 'asc' },
+  });
+
+  const enrollmentStats = await Promise.all(
+    users.map(async (u) => {
+      const [total, completed] = await Promise.all([
+        prisma.enrollment.count({ where: { userId: u.id } }),
+        prisma.enrollment.count({ where: { userId: u.id, completedAt: { not: null } } }),
+      ]);
+      const progresses = await prisma.lessonProgress.findMany({
+        where: { enrollment: { userId: u.id } },
+        select: { progressPct: true },
+      });
+      const avgProgress =
+        progresses.length > 0
+          ? Math.round(progresses.reduce((s, p) => s + p.progressPct, 0) / progresses.length)
+          : 0;
+      return { userId: u.id, total, completed, avgProgress };
+    }),
+  );
+
+  const statsMap = new Map(enrollmentStats.map((s) => [s.userId, s]));
+
+  return users.map((u) => {
+    const stats = statsMap.get(u.id)!;
+    return {
+      id: u.id,
+      fullName: u.fullName,
+      email: u.email,
+      employeeCode: u.employeeCode,
+      jobTitle: u.jobPosition?.title ?? u.jobTitle,
+      enrolled: stats.total,
+      completed: stats.completed,
+      completionRate: stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0,
+      avgProgress: stats.avgProgress,
+    };
+  });
+}
+
 // ── Export ────────────────────────────────────────────────────
 
 export async function exportComplianceReport(companyId: string): Promise<Buffer> {

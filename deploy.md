@@ -3,6 +3,440 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-09 03:00] Config: CI/CD tự động — lịch deploy 3h sáng hàng ngày
+
+**Loại:** config + deploy
+
+**Các thay đổi:**
+- `D:\LMS PTHG\deploy.ps1` — script deploy đầy đủ: git pull → npm install → npm run build → prisma db push → pm2 reload → health check; ghi log ra `logs\deploy_YYYYMMDD_HHMMSS.log`
+- `D:\LMS PTHG\deploy.bat` — wrapper gọi deploy.ps1 (cần cho Task Scheduler)
+- Windows Task Scheduler: Task `LMS_AutoDeploy` — chạy 3:00 AM hàng ngày, user Administrator, quyền Highest
+
+**Kết quả:**
+- Task Scheduler: `Ready`, Next Run: 7/10/2026 3:00:00 AM ✅
+- Test run trigger thành công ✅
+
+**Lệnh hữu ích:**
+```powershell
+# Deploy thủ công
+powershell -ExecutionPolicy Bypass -File "D:\LMS PTHG\deploy.ps1"
+
+# Trigger ngay (không cần đợi 3h)
+schtasks /Run /TN "LMS_AutoDeploy"
+
+# Xem lịch
+schtasks /Query /TN "LMS_AutoDeploy" /FO LIST
+
+# Xem log gần nhất
+Get-ChildItem "D:\LMS PTHG\logs" -Filter "deploy_*.log" | Sort LastWriteTime -Desc | Select -First 1 | Get-Content
+```
+
+**Lưu ý / Rủi ro:**
+- `pm2 reload` (không phải restart) — zero-downtime
+- `prisma db push --accept-data-loss` — an toàn, chỉ apply schema delta; không xóa data trừ khi có column drop
+- Log file tích lũy theo ngày tại `D:\LMS PTHG\logs\` — cần dọn định kỳ
+
+## [2026-07-09 18:00] Data scoping theo phân cấp tổ chức + Activity Log
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `prisma/schema.prisma`: Thêm `createdById` vào `QuestionBank` và `LearningPath`; thêm model `ActivityLog` với enum `ActivityAction`
+- `src/lib/activity-logger.ts` (mới): Fire-and-forget logger ghi nhật ký CREATE/UPDATE/DELETE
+- `src/services/org-scope.service.ts` (mới): Tính danh sách userId được phép xem theo phân cấp tổ chức (admins=null, dept_head=CTE đệ quy, instructor=[userId])
+- `src/services/course.service.ts`, `question-bank.service.ts`, `learning-path.service.ts`: Thêm `scopedUserIds` filter + `createdById` khi tạo
+- `src/app/api/courses/route.ts`, `[id]/route.ts`: Scoping + activity logging
+- `src/app/api/question-banks/route.ts`, `[id]/route.ts`: Scoping + activity logging
+- `src/app/api/learning-paths/route.ts`, `[id]/route.ts`: Scoping + activity logging
+- `src/app/api/users/route.ts`, `[id]/route.ts`: Activity logging cho CREATE/UPDATE user
+- `src/app/api/activity-logs/route.ts` (mới): GET endpoint cho company_admin/group_admin với filter theo resource, action, phân trang
+- `src/jobs/cron.ts`: Thêm cron job 03:00 hàng ngày xóa activity log cũ hơn 30 ngày
+- `components/web/web-shell.tsx`: Đã fix trong session trước (sidebar LEARNER_EXTRA cho user đa vai trò)
+- `src/app/(dashboard)/operations/page.tsx`: Thêm tab "Nhật ký" hiển thị activity log với filter và phân trang
+
+**Kết quả:**
+- Build thành công, không có lỗi TypeScript
+- `lms-web` và `lms-worker` đang online
+- Instructor/dept_head chỉ thấy khóa học/lộ trình/ngân hàng câu hỏi do mình tạo hoặc cấp dưới tạo
+- company_admin/group_admin thấy toàn bộ (null = không filter)
+- Mọi thao tác thêm/sửa/xóa đều được ghi vào ActivityLog
+- Nhật ký tự động xóa sau 30 ngày qua cron
+
+**Lưu ý / Rủi ro:**
+- `createdById` nullable: bản ghi cũ tạo trước migration sẽ có NULL → instructor cũ có thể không thấy khóa học cũ của mình (cần backfill thủ công nếu cần)
+- Recursive CTE dùng `prisma.$queryRaw` với kiểu UUID — cần test kỹ nếu có dept_head có nhiều bộ phận lồng sâu
+
+## [2026-07-09 16:00] Quiz import wizard + câu hỏi của tôi filter
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/api/lessons/[lessonId]/quiz-import/route.ts`: bỏ tự động tạo ngân hàng, yêu cầu `bankId` + `categoryId` trong FormData
+- `src/app/(dashboard)/courses/[id]/page.tsx`: thêm 3-step wizard cho import CSV (step 1: chọn/tạo bank, step 2: chọn category, step 3: upload file); wire fetch banks + categories khi mở modal
+- `src/services/question-bank.service.ts`: thêm `createdById` vào `QuestionFilter` và truyền vào Prisma where clause
+- `src/app/api/question-banks/[id]/questions/route.ts`: pass `createdById` từ query param vào `getQuestions()`
+- `src/components/question-bank/question-list.tsx`: thêm prop `userId`, toggle "Câu hỏi của tôi" lọc theo `createdById`
+- `src/app/(dashboard)/question-banks/[id]/page.tsx`: pass `userId={user?.id}` vào `QuestionList`
+
+**Kết quả:**
+- Build thành công, pm2 restart lms-web online
+- Import CSV quiz bây giờ yêu cầu chọn ngân hàng câu hỏi trước (không tự tạo bank mới)
+- Instructor có thể lọc "Câu hỏi của tôi" trong trang ngân hàng câu hỏi
+
+**Lưu ý / Rủi ro:**
+- Breaking change: nếu có client code cũ gọi `/api/lessons/[lessonId]/quiz-import` mà không gửi `bankId` → trả lỗi 400
+
+## [2026-07-09 11:00] Mobile = Learner-only bottom nav / Desktop = full sidebar
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/components/web/sidebar.tsx`:
+  - Thêm `mobileVisible` flag vào `NavItem` interface và từng item trong `NAV_ITEMS`
+  - Thêm `useIsMobile()` hook (dùng `window.matchMedia`)
+  - Trên mobile (< 768px): render `<nav fixed bottom>` với 5 tab cố định (Dashboard, Khóa học, Lộ trình, Thông báo, Hồ sơ) — không filter theo role, mọi user đều thấy learner view
+  - Trên desktop: render sidebar trái như cũ (full role-based)
+  - Mở rộng `roles` của `/my-courses` + `/my-learning-paths` để `instructor`, `dept_head`, `hr_manager`, `company_admin` cũng truy cập được trên desktop
+- `src/components/web/web-shell.tsx`: Thêm `pb-20 md:pb-6` cho `<main>` để content không bị bottom nav che trên mobile
+
+**Kết quả:**
+- Mobile: mọi user thấy bottom nav 5 tab (học viên thuần), không thấy menu quản trị
+- Desktop: sidebar đầy đủ theo role, instructor + admin thấy thêm "Khóa học của tôi" trong sidebar
+- Build thành công, pm2 online
+
+## [2026-07-09 10:00] Org Chart: nút "Di chuyển vào..." + drag highlight + ẩn watermark
+
+**Loại:** feature + fix
+
+**Các thay đổi:**
+- `src/components/org-chart/OrgChartViewer.tsx`:
+  - Ẩn watermark React Flow (`proOptions={{ hideAttribution: true }}`)
+  - Thêm icon `Move` từ lucide-react
+  - Thêm `onMove`, `isDragTarget` vào `OrgNodeData`; `isDragTarget` render ring xanh khi node đang bị kéo vào
+  - Thêm nút "Di chuyển vào..." (icon Move, màu indigo) trong context menu edit mode — cùng chỗ với `+` và ⚠️
+  - Thêm `MoveToParentModal`: modal tìm kiếm + chọn org cha mới; tự loại bỏ node hiện tại và descendants khỏi danh sách (tránh cycle); PATCH `/api/organizations/[id]` với `{ parentId }`
+  - Thêm `handleNodeDrag`: real-time highlight node đang hover khi kéo (drag visual feedback)
+  - Cập nhật `handleNodeDragStop`: reset `dragOverNodeId` sau khi thả
+  - Cập nhật `buildGraph()`: nhận thêm `dragOverNodeId` và `onMove` callback; truyền vào từng node data
+  - Thêm `moveTarget` + `dragOverNodeId` state trong `OrgChartInner`
+
+**Kết quả:**
+- Hover node trong edit mode → thấy 3 nút: `+`, `Di chuyển`, `⚠️`
+- Click "Di chuyển" → modal xuất hiện với list + search
+- Chọn org cha mới → "Di chuyển" → chart reload với phân cấp đúng
+- Kéo node → node bên dưới sáng lên (ring xanh) để người dùng biết thả vào đâu
+- Build thành công, pm2 restart online
+
+**Lưu ý / Rủi ro:**
+- Backend đã có `parentId` trong `updateOrgSchema` — không cần sửa thêm
+
+## [2026-07-08 20:00] Bug fix: org node click crash + drag-to-reparent
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/organization.service.ts`: Sửa `updateOrgSchema` để nhận `parentId` (cho reparent PATCH). Fix `getOrganization()` rename `deptPositions → positions` để khớp với interface `OrgDetail` ở frontend (bug gây crash khi click node)
+- `src/components/org-chart/OrgChartViewer.tsx`: Thêm `ReparentConfirmModal` component; thêm `reparentConfirm` state; thêm `handleNodeDragStop` handler phát hiện overlap node để trigger dialog xác nhận di chuyển; đổi `nodesDraggable={false}` → `nodesDraggable={isEditMode}` cho phép kéo node trong edit mode; wire `onNodeDragStop` vào ReactFlow
+
+**Kết quả:**
+- Bug 1 (crash khi click phòng ban): đã fix — `positions` field được map đúng
+- Bug 2 (không kéo node tạo phân cấp): đã fix — bật edit mode → kéo node "Phòng KD" thả vào "Công ty A" → dialog xác nhận → PATCH parentId → chart re-layout với dagre
+- `npm run build` + `pm2 restart lms-web` thành công (status: online)
+
+**Lưu ý / Rủi ro:**
+- Reparent PATCH gọi `PATCH /api/organizations/[id]` với `{ parentId }` — `updateOrgSchema` đã được extend để nhận field này
+- Dagre tự re-layout sau mỗi lần loadOrgs() — vị trí node sau drag sẽ reset về layout chuẩn (đúng behavior)
+
+## [2026-07-08 17:30] Interactive Org Chart + Hierarchical Learning Dashboard
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `prisma/schema.prisma`: Thêm `dept_head` vào enum `RoleType`
+- `src/types/index.ts`: Thêm `dept_head` vào type `RoleType`
+- `src/services/user.service.ts`: Thêm `dept_head` vào `assignRoleSchema`
+- `src/middleware/require-role.ts`: Thêm `dept_head` vào `withAuth` allowed roles
+- `src/components/org-chart/OrgChartViewer.tsx`: **Viết lại hoàn toàn** — thêm:
+  - User list panel bên trái (searchable, draggable cards) khi ở edit mode
+  - Drag-and-drop user → org node → tạo UserRole(learner, orgId)
+  - Context menu trên mỗi node: [+] Thêm đơn vị con, [⚠] Vô hiệu hóa
+  - AddChildModal: quick-create phòng ban/nhóm trực tiếp từ chart
+  - DeactivateWizard: 4-step wizard (impact check → xử lý NV → xử lý KH → xác nhận)
+  - Side panel member management: badge "Trưởng", nút đặt/bỏ trưởng, gỡ thành viên
+- `src/app/(dashboard)/organizations/[id]/page.tsx`: Wire OrgChartViewer vào tab "Sơ đồ tổ chức", thêm `dept_head` vào role label + assign dropdown
+- `src/app/api/users/[id]/roles/route.ts`: Thêm `DELETE` handler để gỡ UserRole
+- `src/services/organization.service.ts`: Update `getOrganization()` để group roles per user (hỗ trợ multiple roles per user per org)
+- `src/app/api/organizations/[id]/impact/route.ts` (NEW): Impact check API — đếm NV, KH, sub-orgs bị ảnh hưởng
+- `src/app/api/organizations/[id]/deactivate/route.ts` (NEW): Soft-deactivate toàn sub-tree trong 1 transaction
+- `src/app/api/organizations/[id]/migrate-users/route.ts` (NEW): Bulk migrate UserRole records sang org khác
+- `src/services/report.service.ts`: Thêm `getOrgSubtreeIds()`, `getManagedOrgs()`, `getDeptChildrenStats()`, `getDeptEmployees()`
+- `src/app/api/reports/dept/route.ts` (NEW): Lấy danh sách org nodes user quản lý
+- `src/app/api/reports/dept/[orgId]/route.ts` (NEW): Hierarchical stats (children aggregate / employees flat)
+- `src/app/api/reports/dept/users/[userId]/route.ts` (NEW): User learning detail cho dept_head
+- `src/components/web/sidebar.tsx`: Thêm "Bộ phận của tôi" cho dept_head/company_admin/hr_manager
+- `src/app/(dashboard)/my-department/page.tsx` (NEW): Hierarchical drill-down dashboard
+
+**Kết quả:**
+- Build: ✅ thành công
+- DB migration: ✅ `prisma db push` (dept_head enum thêm vào PostgreSQL)
+- PM2: lms-web + lms-worker đều online
+
+**Lưu ý / Rủi ro:**
+- `dept_head` role mới: user cần được gán thông qua Sơ đồ tổ chức hoặc trang Người dùng
+- Deactivate org sẽ cascade soft-delete toàn sub-tree — không thể undo trực tiếp (cần manual set isActive=true)
+- User list trong OrgChartViewer lấy tối đa 500 users — cần phân trang nếu công ty > 500 NV
+
+## [2026-07-08 21:00] Config: Hoàn thiện môi trường production
+
+**Loại:** config + deploy
+
+**Các thay đổi:**
+
+**nginx — MinIO SSL proxy:**
+- Thêm server block `listen 9002 ssl` vào `C:\nginx\conf\nginx.conf`
+- Proxy `https://lms.phuthaiholdings.com:9002` → `http://127.0.0.1:9000` (MinIO internal)
+- SSL dùng cert `pth-fullchain.pem` / `Privatekey.key`; `client_max_body_size 500M`
+- nginx restart bằng `net stop/start nginx` (service Windows)
+
+**MinIO:**
+- Thêm `MINIO_PUBLIC_URL="https://lms.phuthaiholdings.com:9002"` vào `D:\LMS PTHG\.env`
+- Next.js tự load từ `.env` khi khởi động — presigned URL dùng public hostname thay vì 127.0.0.1
+- Cài `C:\mc.exe` (MinIO client 31MB); xác nhận bucket `lms-temp` và `lms-private` đã tồn tại
+- Restart `lms-web --update-env` để nhận biến môi trường mới
+
+**AI Service (FastAPI):**
+- Thêm `lms-ai` vào `ecosystem.config.js` (local và production)
+- Script: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1`, cwd `./ai-service`
+- Tạo `D:\LMS PTHG\ai-service\.env`: `NEXTJS_URL=https://lms.phuthaiholdings.com:5985`, `NEXTJS_API_KEY=lms-internal-ai-key-2026`
+- Cài pip packages thiếu: `pymupdf`, `python-docx`, `python-pptx`, `python-multipart`, `pydantic-settings`
+- PM2 startOrReload → `lms-ai` online (pid 2480)
+
+**PATH hệ thống:**
+- Thêm `C:\Program Files\Redis` vào system PATH → `redis-cli ping = PONG`
+- FFmpeg `C:\ffmpeg\bin` đã được add vào `lms-worker` env trong ecosystem.config.js (session trước)
+
+**Kết quả sau setup:**
+- LMS web (port 3004): HTTP 200 ✅
+- AI service (port 8000): HTTP 200 `{"status":"ok","service":"LMS AI Service"}` ✅
+- MinIO (port 9000): HTTP 200 ✅
+- MinIO HTTPS proxy (port 9002): LISTENING ✅
+- Redis: PONG ✅
+- PM2: lms-web + lms-worker + lms-ai đều `online` ✅
+
+**Lưu ý / Rủi ro:**
+- Ollama bỏ qua — sẽ dùng AI API khác (cấu hình qua bảng `AiServiceConfig` trong DB)
+- Redis v5.0.14.1 (BullMQ khuyến nghị ≥ 6.2.0) — hoạt động bình thường, nâng cấp khi có kế hoạch maintenance
+- `MINIO_PUBLIC_URL` trong `.env` được Next.js load tự động; không cần add vào ecosystem.config.js env block
+- Port 5985 (nginx → Next.js HTTPS proxy) đang LISTENING — dùng cho NEXTJS_URL trong ai-service
+
+---
+
+## [2026-07-08 19:40] Fix: Import nhân sự không hiển thị trong phòng ban
+
+**Loại:** fix + data migration
+
+**Nguyên nhân gốc:**
+- File Excel import nhân sự không có cột `orgCode` (hoặc để trống)
+- Code trong `importUsers()` chỉ tạo `UserRole` khi `if (org)` — nếu `orgCode` trống thì `org = null`, không tạo UserRole → user tồn tại trong DB nhưng không thuộc phòng ban nào → không hiển thị trong tổ chức
+- `validateUserRows()` không validate `orgCode` là bắt buộc → import báo SUCCESS mà không có cảnh báo → lỗi âm thầm
+
+**Các thay đổi:**
+- `src/services/import.service.ts`: Thêm validation bắt buộc `orgCode` trong `validateUserRows()` — nếu thiếu trả về lỗi rõ ràng, import fail sớm thay vì tạo user mồ côi
+
+**Data fix trực tiếp trên production:**
+- 17 user nhập (email `@phuthaiholdings.com`, `@bifrostinvestment.com`) đều không có `UserRole`
+- Tạo `UserRole` role=`learner`, `organizationId` = công ty "Phú Thái Holdings" (`64836537-...`) cho cả 17 user
+- User hiện visible trong hệ thống; admin cần vào trang Users để gán đúng phòng ban
+
+**Kết quả:**
+- 17 `UserRole` records tạo thành công ✅
+- Build incremental thành công (First Load JS confirmed) ✅
+- lms-web + lms-worker online, HTTP 200 ✅
+
+**Lưu ý / Rủi ro:**
+- 17 user hiện đang được gán vào tổ chức gốc "Phú Thái Holdings" với role `learner` — cần admin gán đúng phòng ban qua UI hoặc re-import với file có cột `orgCode` đúng
+- Từ nay import nhân sự **bắt buộc có cột `orgCode`** — nếu để trống sẽ báo lỗi validation rõ ràng
+
+## [2026-07-08 18:52] Fix: Upload video báo "xử lý thất bại" — cài FFmpeg trên production
+
+**Loại:** fix + config
+
+**Nguyên nhân gốc:**
+- `lms-worker` (BullMQ asset processor) gọi `spawn('ffmpeg', ...)` nhưng `ffmpeg` chưa được cài trên Windows Server 2016
+- Lỗi: `spawn ffmpeg ENOENT` → mọi job xử lý video đều fail sau 3 lần retry → `processingStatus = 'FAILED'` → UI hiển thị "Xử lý thất bại"
+
+**Các bước xử lý:**
+1. Kiểm tra PM2 logs `lms-worker` → phát hiện `spawn ffmpeg ENOENT`
+2. Tải FFmpeg 8.1.2 (gyan.dev essentials build, tương thích Windows Server 2016) về `C:\ffmpeg\bin\`
+3. Thêm `C:\ffmpeg\bin` vào system PATH (registry `HKLM\SYSTEM\...\Environment`)
+4. Cập nhật `ecosystem.config.js`: thêm `PATH: 'C:\\ffmpeg\\bin;...'` vào env của `lms-worker` để đảm bảo worker luôn tìm thấy ffmpeg dù PM2 daemon chạy dưới user nào
+5. Reload PM2 từ ecosystem.config.js (`pm2 startOrReload`) + save dump
+
+**Kết quả:**
+- `ffmpeg -version` → `ffmpeg version 8.1.2-essentials_build-www.gyan.dev` (exit 0) ✅
+- `lms-worker` online, không còn lỗi ENOENT trong logs ✅
+- Upload video mới sẽ được xử lý HLS bình thường
+
+**Lưu ý / Rủi ro:**
+- FFmpeg lần đầu tải BtbN latest build (168MB) nhưng bị lỗi `0xC0000139` (API không tương thích Windows Server 2016). Phải đổi sang gyan.dev essentials build
+- `ecosystem.config.js` đã được commit và upload lên production. PATH được hardcode `C:\ffmpeg\bin` ở đầu để đảm bảo không bị mất khi PM2 restart
+
+## [2026-07-08 14:30] Fix: quiz options trống — migrate DB + normalize service + sửa UI
+
+**Loại:** fix + data migration
+
+**Nguyên nhân (3 lớp):**
+- DB có 2 format option không tương thích: 73 câu `{key,text}` (chuẩn) và 30 câu `{id,label,content}` (sai)
+- `correctAnswer` của 30 câu sai lưu UUID thay vì `"A"/"B"/"C"/"D"` → chấm điểm luôn sai
+- Web UI dùng `opt.id`/`opt.label`/`opt.content` → trả về `undefined` cho 73 câu format chuẩn
+
+**Các thay đổi:**
+
+1. **Data migration (Node.js)** — 30 câu hỏi format `{id,label,content}`:
+   - Convert `options` → `{key: label, text: content}`
+   - Convert `correctAnswer` UUID → label (`"A"/"B"/"C"/"D"`)
+   - Kết quả: 30/30 thành công, 0 lỗi
+
+2. **`src/services/quiz.service.ts`** — normalize options khi trả về API:
+   - Map `o.key || o.label` và `o.text || o.content` → luôn trả `{key, text}` dù DB format nào
+
+3. **`src/app/(dashboard)/my-courses/[id]/lessons/[lessonId]/page.tsx`**:
+   - Interface `QuizQuestion.options`: `{id,label,content}` → `{key,text}`
+   - Radio `key/value/checked/onChange`: dùng `opt.key` thay `opt.id`
+   - Display: `opt.key.` + `opt.text` thay `opt.label.` + `opt.content`
+
+**Kết quả:** Build OK, pm2 online. Quiz hiển thị đủ đáp án và chấm điểm đúng.
+
+## [2026-07-08 14:00] Fix: quiz web không hiển thị câu hỏi (chỉ thấy đáp án)
+
+**Loại:** fix
+
+**Nguyên nhân:** Field name mismatch — API trả về `questionText` (đúng với Prisma schema `Question.questionText`) nhưng web dashboard dùng `q.content` để render. App PWA dùng đúng `q.questionText` nên bình thường.
+
+**Thay đổi:**
+- `src/app/(dashboard)/my-courses/[id]/lessons/[lessonId]/page.tsx`:
+  - Interface `QuizQuestion`: đổi field `content: string` → `questionText: string`
+  - Render: `{q.content}` → `{q.questionText}` (line 314)
+
+**Kết quả:** Build thành công, `pm2 restart lms-web` → online. Quiz web hiển thị đầy đủ câu hỏi.
+
+## [2026-07-08 13:30] Fix: hiển thị nội dung tài liệu Word inline (không cho tải)
+
+**Loại:** fix
+
+**Nguyên nhân:** Tài liệu Word (DOCX) đính kèm bài học không hiển thị để học viên đọc. Browser không thể render DOCX natively. Cần convert server-side → HTML rồi hiển thị inline. Học viên không được phép tải (downloadPolicy=BLOCKED).
+
+**Các thay đổi:**
+- `src/app/api/assets/[id]/html-preview/route.ts` — tạo mới: convert DOCX → HTML bằng mammoth.js server-side, trả JSON `{ html }`. Yêu cầu auth, không expose presigned URL cho browser.
+- `src/app/(dashboard)/my-courses/[id]/lessons/[lessonId]/page.tsx`:
+  - Bỏ toàn bộ logic download attachment (download=BLOCKED là đúng)
+  - Thêm state `docHtml` (per assetId) + `loadDocHtml()` fetch từ `/html-preview`
+  - Thêm section hiển thị nội dung Word inline: auto-load khi render, spinner khi đang convert, hiển thị HTML với `prose` styling, max-height 70vh có scroll
+  - Chỉ áp dụng cho `mimeType` wordprocessingml/msword (PDF vẫn dùng PdfViewer như cũ)
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Học viên vào khóa "Hướng dẫn tạo phân bổ hàng trên NAV" thấy nội dung file Word hiển thị trực tiếp, không có nút tải xuống
+
+## [2026-07-08 13:00] Fix: học viên không thấy tài liệu DOC đính kèm bài học text
+
+**Loại:** fix
+
+**Nguyên nhân (4 lớp):**
+1. Bài học `contentType: "text"` có DOCX đính kèm — UI chỉ hiển thị viewer cho `pdf`/`video`, bỏ qua attachment của bài text
+2. File DOCX không thể render trong browser bằng pdf.js, cần download
+3. `downloadPolicy: "BLOCKED"` nhưng content proxy `/content` không kiểm tra policy → có thể dùng
+4. Không có section "Tài liệu đính kèm" nào ở bất kỳ lesson type nào
+
+**Các thay đổi:**
+- `src/services/enrollment.service.ts` — `getMyCourse()`: bỏ `take: 1` trên assets/linkedAssets, gộp + dedup thành field `attachments[]` trong mỗi lesson
+- `src/app/(dashboard)/my-courses/[id]/lessons/[lessonId]/page.tsx`:
+  - Thêm interface `LessonAttachment` + field `attachments` vào `LessonDetail`
+  - Thêm `handleDownloadAttachment()`: fetch qua content proxy với Bearer token → blob → tạo anchor download
+  - Thêm section "Tài liệu đính kèm" hiển thị cho MỌI loại bài học nếu có attachment (icon + tên + nút tải)
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Học viên vào khóa "Hướng dẫn tạo phân bổ hàng trên NAV" thấy file DOCX trong section "Tài liệu đính kèm" và có thể tải xuống
+
+## [2026-07-08 12:00] Redesign PdfViewer: cuộn trang + auto-fit + fullscreen
+
+**Loại:** feature / fix
+
+**Các thay đổi:**
+- `src/components/lesson/PdfViewer.tsx` — viết lại toàn bộ:
+  - Render tất cả trang vào một container cuộn dọc (thay vì từng trang bấm chuyển)
+  - Auto-fit width: scale tự tính theo `containerWidth / pageNaturalWidth`, zoom factor nhân thêm
+  - HiDPI-aware: dùng `devicePixelRatio` để canvas sắc nét trên màn hình Retina
+  - IntersectionObserver theo dõi trang đang hiển thị khi cuộn → cập nhật indicator + tracking
+  - ResizeObserver re-render khi container thay đổi kích thước (window resize, fullscreen)
+  - Nút fullscreen (requestFullscreen API)
+  - Toolbar: page indicator input (nhảy tới trang), zoom −/+/reset, nút fullscreen
+  - Xóa nút Trước/Sau; thay bằng cuộn tự nhiên
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → status `online`
+
+## [2026-07-08 11:30] Fix: "Failed to fetch" khi học viên mở tài liệu khóa học
+
+**Loại:** fix
+
+**Nguyên nhân:**
+LMS chạy HTTPS (`https://lms.phuthaiholdings.com:5980`) nhưng MinIO presigned URL là HTTP (`http://lms.phuthaiholdings.com:9000`). Browser chặn **mixed content** → TypeError "Failed to fetch" khi PdfViewer/VideoPlayer cố load từ MinIO trực tiếp.
+
+**Các thay đổi:**
+- `src/app/api/assets/[id]/content/route.ts` — tạo mới: proxy endpoint HTTPS stream nội dung từ MinIO server-side, hỗ trợ Range requests, yêu cầu Bearer auth
+- `src/app/api/assets/[id]/manifest/route.ts` — sửa: MP4 không redirect sang MinIO URL nữa, thay bằng proxy nội dung giống pattern HLS (tránh mixed content)
+- `src/components/lesson/PdfViewer.tsx` — sửa: không gọi `/api/assets/[id]/view-url` rồi lấy presigned URL nữa; thay bằng `pdfjsLib.getDocument({ url: '/api/assets/[id]/content', httpHeaders: { Authorization } })` để stream qua proxy
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → status `online`
+- Học viên có thể mở tài liệu PDF và xem video MP4
+
+**Lưu ý / Rủi ro:**
+- Content proxy load toàn bộ qua Next.js server — với file lớn có thể tốn RAM server. Nếu cần scale, xem xét cấu hình SSL trực tiếp trên MinIO (`MINIO_USE_SSL=true`)
+- HLS video không bị ảnh hưởng (manifest + segment đã proxy từ trước)
+
+## [2026-07-08 11:00] Fix: học viên không thấy tài liệu PDF/DOC đính kèm bài học
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/enrollment.service.ts` — hàm `getMyCourse()`: bổ sung include `linkedAssets` (junction table `LessonAsset`) bên cạnh `assets` (FK trực tiếp) khi query lesson. Cập nhật mapping `durationSeconds` và `assetId` để fallback sang `linkedAssets[0].asset` nếu `assets[0]` không có.
+
+**Nguyên nhân lỗi:**
+- Admin đính kèm tài liệu qua `linkAssetToLesson()` → tạo record trong bảng junction `LessonAsset` (field `Lesson.linkedAssets`)
+- Learner query chỉ include `Lesson.assets` (FK `ContentAsset.lessonId`) — bỏ sót hoàn toàn junction table
+- Kết quả: `assetId = null` → UI hiển thị "Không có tài liệu PDF" / "Không có video"
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → status `online`
+- Học viên sẽ thấy tài liệu PDF/DOC/video đã đính kèm
+
+**Lưu ý / Rủi ro:**
+- Không có breaking change; logic ưu tiên direct FK, fallback junction table — tương thích cả hai cách upload cũ và mới
+
+## [2026-07-07 20:17] Deploy: Phase 2 — Pull master từ GitHub lên production 10.191.36.72
+
+**Loại:** deploy
+
+**Các thay đổi:**
+- Git init tại `D:\LMS PTHG`, thêm remote GitHub, fetch + reset --hard `origin/master`
+- Commit mới: `d0c76e7` (chore: add reference docs, assets, scripts, and md-to-pdf dependency)
+- `npm install --include=dev --legacy-peer-deps` — restore devDependencies (tailwindcss, prisma, typescript...)
+- Full clean build: xóa `.next/`, build lại từ đầu
+- PM2 resurrect: `lms-web` và `lms-worker` online
+
+**Kết quả:**
+- Layout chunk: `layout-e1511afefbd76b72.js` (18706c) — web-shell mới (bg-surface, flex h-screen, Holdings branding)
+- Login page HTTP 200 OK
+- `lms-web` online, `lms-worker` online
+
+**Lưu ý / Rủi ro:**
+- `npm install` BẮT BUỘC phải chạy WITHOUT `NODE_ENV=production` trước build, sau đó mới set NODE_ENV cho build. Nếu NODE_ENV=production khi install → devDeps (tailwindcss, typescript...) bị xóa → build fail
+- `npm run build` vẫn có bug hang sau khi hoàn thành (open Redis connections). Workaround: dùng PowerShell Start-Process job, detect "First Load JS" trong output, kill process sau 15s rồi resurrect PM2
+- Lần deploy tiếp theo: `git -C "D:\LMS PTHG" pull origin master` thay vì init lại
+
 ## [2026-07-07 20:10] Fix: Phân quyền bật/tắt AI chỉ dành cho company_admin / group_admin
 
 **Loại:** fix

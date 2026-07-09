@@ -200,11 +200,22 @@ export async function getMyCourse(courseId: string, userId: string, companyId: s
                 where: { enrollment: { userId } },
                 take: 1,
               },
-              // Include assets để lấy assetId cho video/pdf player
+              // Tất cả assets READY — dùng [0] cho player, toàn bộ cho danh sách đính kèm
+              // Direct FK (legacy): ContentAsset.lessonId
               assets: {
                 where: { processingStatus: 'READY' },
                 orderBy: { createdAt: 'asc' },
-                take: 1,
+                select: { id: true, title: true, fileType: true, mimeType: true, durationSeconds: true },
+              },
+              // Junction table (preferred): LessonAsset → ContentAsset
+              linkedAssets: {
+                where: { asset: { processingStatus: 'READY' } },
+                include: {
+                  asset: {
+                    select: { id: true, title: true, fileType: true, mimeType: true, durationSeconds: true },
+                  },
+                },
+                orderBy: { createdAt: 'asc' },
               },
             },
           },
@@ -225,10 +236,24 @@ export async function getMyCourse(courseId: string, userId: string, companyId: s
       order: les.displayOrder,
       isRequired: les.isRequired,
       estimatedMinutes: les.estimatedMinutes,
-      // durationSeconds từ asset (dùng để hiển thị thời lượng trong danh sách bài)
-      durationSeconds: les.assets[0]?.durationSeconds ?? null,
-      // assetId cho VideoPlayer / PdfViewer — null nếu chưa upload hoặc chưa xử lý xong
-      assetId: les.assets[0]?.id ?? null,
+      // Gộp tất cả assets từ cả 2 nguồn, loại trùng
+      ...(() => {
+        const seen = new Set<string>();
+        const all: { id: string; title: string; fileType: string; mimeType: string; durationSeconds: number | null }[] = [];
+        for (const a of les.assets) {
+          if (!seen.has(a.id)) { seen.add(a.id); all.push(a); }
+        }
+        for (const la of les.linkedAssets) {
+          if (!seen.has(la.asset.id)) { seen.add(la.asset.id); all.push(la.asset); }
+        }
+        const first = all[0] ?? null;
+        return {
+          durationSeconds: first?.durationSeconds ?? null,
+          assetId: first?.id ?? null,
+          // Tất cả tài liệu đính kèm — hiển thị trong section "Tài liệu đính kèm"
+          attachments: all.map((a) => ({ id: a.id, title: a.title, fileType: a.fileType, mimeType: a.mimeType })),
+        };
+      })(),
       // quizId = lessonId (QuizConfig unique per lesson)
       quizId: les.contentType === 'quiz' ? les.id : null,
       textContent: null,

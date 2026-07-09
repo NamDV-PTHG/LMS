@@ -3,6 +3,8 @@ import { withRole } from '@/middleware/require-role';
 import { getUserById, updateUser, updateUserSchema } from '@/services/user.service';
 import { handleApiError } from '@/app/api/error-handler';
 import { ForbiddenError, ValidationError } from '@/lib/errors';
+import { logActivity, getClientIp } from '@/lib/activity-logger';
+import { prisma } from '@/lib/prisma';
 
 export const GET = withRole(
   ['group_admin', 'company_admin', 'hr_manager'],
@@ -33,6 +35,15 @@ export const PATCH = withRole(
 
       const isGroupAdmin = user.roles.includes('group_admin');
       const updated = await updateUser(params!.id, parsed.data, companyId, isGroupAdmin, user.id);
+
+      const dbUser = await prisma.user.findUnique({ where: { id: user.id }, select: { fullName: true } });
+      logActivity({
+        companyId, userId: user.id, userFullName: dbUser?.fullName ?? '',
+        action: 'UPDATE', resource: 'user',
+        resourceId: params!.id, resourceTitle: updated.fullName,
+        ipAddress: getClientIp(req),
+      });
+
       return NextResponse.json({ success: true, data: updated });
     } catch (err) {
       return handleApiError(err);

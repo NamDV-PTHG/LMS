@@ -34,7 +34,7 @@ export const updateUserSchema = z.object({
 });
 
 export const assignRoleSchema = z.object({
-  role: z.enum(['group_admin', 'group_hrm', 'company_admin', 'hr_manager', 'instructor', 'learner']),
+  role: z.enum(['group_admin', 'group_hrm', 'company_admin', 'hr_manager', 'dept_head', 'instructor', 'learner']),
   organizationId: z.string().uuid(),
 });
 

@@ -24,10 +24,30 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     if (!asset || !asset.isActive) throw new NotFoundError('Asset');
     if (asset.processingStatus !== 'READY') throw new ValidationError('Nội dung chưa sẵn sàng');
 
-    // Non-HLS: redirect to presigned MP4 URL
+    // Non-HLS: proxy content through Next.js to avoid mixed-content errors.
+    // (LMS is HTTPS; MinIO presigned URLs are HTTP — browsers block direct access.)
     if (!asset.hlsPlaylistPath) {
+      const fetchHeaders: HeadersInit = {};
+      const range = _req.headers.get('range');
+      if (range) fetchHeaders['Range'] = range;
+
       const mp4Url = await getPresignedDownloadUrl(asset.storagePath);
-      return NextResponse.redirect(mp4Url);
+      const minioRes = await fetch(mp4Url, { headers: fetchHeaders });
+
+      const responseHeaders = new Headers();
+      responseHeaders.set('Content-Type', asset.mimeType ?? 'video/mp4');
+      responseHeaders.set('Accept-Ranges', 'bytes');
+      responseHeaders.set('Cache-Control', 'private, max-age=300');
+
+      const contentLength = minioRes.headers.get('content-length');
+      if (contentLength) responseHeaders.set('Content-Length', contentLength);
+      const contentRange = minioRes.headers.get('content-range');
+      if (contentRange) responseHeaders.set('Content-Range', contentRange);
+
+      return new NextResponse(minioRes.body, {
+        status: minioRes.status,
+        headers: responseHeaders,
+      });
     }
 
     // Fetch raw m3u8 content from MinIO (server-side)

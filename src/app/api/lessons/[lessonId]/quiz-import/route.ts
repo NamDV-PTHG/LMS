@@ -106,6 +106,9 @@ export const POST = withRole(
       const formData = await req.formData();
       const file = formData.get('file') as File | null;
       if (!file) throw new ValidationError('Thiếu file CSV');
+      const bankId = formData.get('bankId') as string | null;
+      if (!bankId) throw new ValidationError('Vui lòng chọn ngân hàng câu hỏi');
+      const categoryId = (formData.get('categoryId') as string | null) || null;
 
       const text = await file.text();
       const rows = parseCSV(text);
@@ -223,22 +226,16 @@ export const POST = withRole(
         throw new ValidationError('Không có câu hỏi hợp lệ nào trong file');
       }
 
-      // Create or find a question bank for this lesson
-      const bankName = `Quiz: ${lesson.title}`;
-      let bank = await prisma.questionBank.findFirst({
-        where: { ownerCompanyId: companyId, name: bankName },
+      // Verify the selected bank belongs to this company
+      const bank = await prisma.questionBank.findFirst({
+        where: { id: bankId, ownerCompanyId: companyId },
       });
+      if (!bank) throw new NotFoundError('Ngân hàng câu hỏi');
 
-      if (!bank) {
-        bank = await prisma.questionBank.create({
-          data: { ownerCompanyId: companyId, name: bankName, description: `Ngân hàng câu hỏi cho bài ${lesson.title}` },
-        });
-      }
-
-      // Bulk-create questions
+      // Bulk-create questions into the selected bank
       await prisma.question.createMany({
         data: questions.map((q) => ({
-          bankId: bank!.id,
+          bankId: bank.id,
           createdById: user.id,
           type: q.type as never,
           difficulty: q.difficulty as never,
@@ -249,6 +246,7 @@ export const POST = withRole(
           scorePoints: q.scorePoints,
           tags: [],
           status: 'approved',
+          categoryId: categoryId || null,
         })),
       });
 

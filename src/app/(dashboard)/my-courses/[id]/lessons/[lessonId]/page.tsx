@@ -20,9 +20,9 @@ import { useEffect, useState } from 'react';
 
 interface QuizQuestion {
   id: string;
-  content: string;
+  questionText: string;
   type: string;
-  options: { id: string; label: string; content: string }[];
+  options: { key: string; text: string }[];
 }
 
 interface QuizAttempt {
@@ -31,12 +31,20 @@ interface QuizAttempt {
   timeLimit: number | null;
 }
 
+interface LessonAttachment {
+  id: string;
+  title: string;
+  fileType: string;  // 'document' | 'video' | 'audio' | 'image' | 'presentation'
+  mimeType: string;
+}
+
 interface LessonDetail {
   id: string;
   title: string;
   contentType: string;
   textContent: string | null;
   assetId: string | null;
+  attachments: LessonAttachment[];
   quizId: string | null;
   order: number;
   enrollmentId: string;
@@ -71,7 +79,29 @@ export default function LessonPlayerPage() {
   const [quizSubmitting, setQuizSubmitting] = useState(false);
   const [quizResult, setQuizResult] = useState<{ score: number; passed: boolean; totalQuestions: number } | null>(null);
 
+  // HTML preview cho DOCX: assetId → { html, loading, error }
+  const [docHtml, setDocHtml] = useState<Record<string, { html: string | null; loading: boolean; error: string | null }>>({});
+
   const authHeader = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+
+  // Fetch HTML preview từ DOCX qua mammoth (server-side convert)
+  const loadDocHtml = async (assetId: string) => {
+    if (docHtml[assetId]) return; // đã load rồi
+    setDocHtml((prev) => ({ ...prev, [assetId]: { html: null, loading: true, error: null } }));
+    try {
+      const res = await fetch(`/api/assets/${assetId}/html-preview`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDocHtml((prev) => ({ ...prev, [assetId]: { html: data.data.html, loading: false, error: null } }));
+      } else {
+        setDocHtml((prev) => ({ ...prev, [assetId]: { html: null, loading: false, error: data.error ?? 'Không thể hiển thị tài liệu' } }));
+      }
+    } catch {
+      setDocHtml((prev) => ({ ...prev, [assetId]: { html: null, loading: false, error: 'Lỗi kết nối' } }));
+    }
+  };
 
   useEffect(() => {
     if (!accessToken || !courseId || !lessonId) return;
@@ -281,25 +311,25 @@ export default function LessonPlayerPage() {
                   <div key={q.id} className="space-y-3">
                     <p className="text-[12px] font-medium text-content">
                       <span className="text-primary mr-1">Câu {qi + 1}.</span>
-                      {q.content}
+                      {q.questionText}
                     </p>
                     <div className="space-y-2 pl-4">
                       {q.options.map((opt) => (
                         <label
-                          key={opt.id}
+                          key={opt.key}
                           className="flex items-center gap-2.5 cursor-pointer group"
                         >
                           <input
                             type="radio"
                             name={`q-${q.id}`}
-                            value={opt.id}
-                            checked={quizAnswers[q.id] === opt.id}
-                            onChange={() => setQuizAnswers((a) => ({ ...a, [q.id]: opt.id }))}
+                            value={opt.key}
+                            checked={quizAnswers[q.id] === opt.key}
+                            onChange={() => setQuizAnswers((a) => ({ ...a, [q.id]: opt.key }))}
                             className="accent-primary"
                           />
                           <span className="text-[12px] text-subtle group-hover:text-content transition-colors">
-                            <span className="font-medium text-faint mr-1">{opt.label}.</span>
-                            {opt.content}
+                            <span className="font-medium text-faint mr-1">{opt.key}.</span>
+                            {opt.text}
                           </span>
                         </label>
                       ))}
@@ -397,6 +427,53 @@ export default function LessonPlayerPage() {
 
       {/* Content */}
       {renderContent()}
+
+      {/* Tài liệu học — hiển thị inline cho mọi loại bài học nếu có doc/word attachment */}
+      {lesson.attachments && lesson.attachments
+        .filter((att) =>
+          att.mimeType.includes('wordprocessingml') ||
+          att.mimeType.includes('msword') ||
+          att.fileType === 'document'
+        )
+        .map((att) => {
+          const state = docHtml[att.id];
+          // Tự động load khi render lần đầu
+          if (!state) { loadDocHtml(att.id); }
+
+          return (
+            <div key={att.id} className="bg-surface border border-default rounded-xl shadow-card overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-default bg-muted/40">
+                <svg viewBox="0 0 20 20" className="w-4 h-4 fill-current text-primary flex-shrink-0">
+                  <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 000 2h8a1 1 0 100-2H6zm0 4a1 1 0 100 2h4a1 1 0 100-2H6z"/>
+                </svg>
+                <span className="text-[12px] font-medium text-content truncate">{att.title}</span>
+                <span className="text-[10px] text-faint ml-auto flex-shrink-0">Word</span>
+              </div>
+
+              {/* Nội dung */}
+              {(!state || state.loading) && (
+                <div className="flex items-center justify-center gap-2 py-10">
+                  <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  <span className="text-[12px] text-subtle">Đang tải tài liệu...</span>
+                </div>
+              )}
+              {state?.error && (
+                <div className="px-5 py-6 text-center text-[12px] text-danger">
+                  {state.error}
+                </div>
+              )}
+              {state?.html && (
+                <div
+                  className="px-6 py-5 prose prose-sm max-w-none text-content overflow-auto"
+                  style={{ maxHeight: '70vh' }}
+                  dangerouslySetInnerHTML={{ __html: state.html }}
+                />
+              )}
+            </div>
+          );
+        })
+      }
 
       {/* Complete button for text/manual */}
       {(lesson.contentType === 'text' || lesson.contentType === 'pdf') && !completed && (

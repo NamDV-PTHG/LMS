@@ -273,9 +273,14 @@ export async function startQuiz(
       type: q.type,
       difficulty: q.difficulty,
       questionText: q.questionText,
-      options: shuffleOpts
-        ? shuffleArray(q.options as { key: string; text: string }[])
-        : (q.options as { key: string; text: string }[]),
+      // Normalize options to {key, text} — handles legacy {id, label, content} format gracefully
+      options: (() => {
+        const raw = (q.options as Array<Record<string, string>>).map((o) => ({
+          key: o.key || o.label || '',
+          text: o.text || o.content || '',
+        }));
+        return shuffleOpts ? shuffleArray(raw) : raw;
+      })(),
       scorePoints: q.scorePoints,
     })),
     totalQuestions: selected.length,

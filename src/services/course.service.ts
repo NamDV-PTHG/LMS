@@ -85,8 +85,15 @@ export async function getCourses(
   companyId: string,
   isGroupAdmin: boolean,
   filters: { page: number; limit: number; published?: boolean; includeShared?: boolean },
+  scopedUserIds?: string[] | null,
 ) {
   const { page, limit, published, includeShared } = filters;
+
+  // scopedUserIds = null → no restriction (admins)
+  // scopedUserIds = string[] → filter by createdById IN [...]
+  const creatorFilter = scopedUserIds != null
+    ? { createdById: { in: scopedUserIds } }
+    : {};
 
   // Với group_admin: xem tất cả khóa học
   // Với company_admin/instructor: xem khóa học của công ty + khóa học được chia sẻ
@@ -107,6 +114,7 @@ export async function getCourses(
 
     where = {
       isActive: true,
+      ...creatorFilter,
       ...(published !== undefined ? { isPublished: published } : {}),
       OR: [
         { ownerCompanyId: companyId },
@@ -117,6 +125,7 @@ export async function getCourses(
     where = {
       isActive: true,
       ownerCompanyId: companyId,
+      ...creatorFilter,
       ...(published !== undefined ? { isPublished: published } : {}),
     };
   }

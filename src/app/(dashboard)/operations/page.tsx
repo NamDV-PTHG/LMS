@@ -4,7 +4,7 @@ import { useAuth } from '@/components/providers/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { RefreshCw, Database, Archive, RotateCcw, Play, ChevronDown, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Database, Archive, RotateCcw, Play, ChevronDown, AlertTriangle, ClipboardList, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface SystemInfo {
   platform: string;
@@ -104,7 +104,7 @@ export default function OperationsPage() {
   const [error,       setError]       = useState('');
   const [countdown,   setCountdown]   = useState(REFRESH_INTERVAL);
   const [lastRefresh, setLastRefresh] = useState('');
-  const [activeTab,   setActiveTab]   = useState<'system' | 'backup'>('system');
+  const [activeTab,   setActiveTab]   = useState<'system' | 'backup' | 'activity'>('system');
 
   // Backup state
   const [backupJobs,     setBackupJobs]     = useState<BackupJobRecord[]>([]);
@@ -117,10 +117,27 @@ export default function OperationsPage() {
   const [companyOpts,    setCompanyOpts]    = useState<CompanyOption[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Activity log state
+  interface ActivityLogItem {
+    id: string; companyId: string; userId: string; userFullName: string;
+    action: 'CREATE' | 'UPDATE' | 'DELETE'; resource: string;
+    resourceId: string; resourceTitle: string; ipAddress: string | null;
+    createdAt: string;
+  }
+  const [activityLogs,    setActivityLogs]    = useState<ActivityLogItem[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityPage,    setActivityPage]    = useState(1);
+  const [activityTotal,   setActivityTotal]   = useState(0);
+  const [activityFilter,  setActivityFilter]  = useState({ resource: '', action: '' });
+  const ACTIVITY_LIMIT = 20;
+
   const userRoles: string[] = ((user?.roles ?? []) as Array<{ role: string } | string>).map((r) =>
     typeof r === 'string' ? r : r.role,
   );
-  const isGroupAdmin = userRoles.includes('group_admin');
+  const isGroupAdmin    = userRoles.includes('group_admin');
+  const isCompanyAdmin  = userRoles.includes('company_admin');
+  // company_admin chỉ thấy tab Nhật ký — mặc định vào đó ngay
+  const canSeeSystem    = isGroupAdmin;
 
   const fetchBackupJobs = useCallback(async () => {
     if (!accessToken || !isGroupAdmin) return;
@@ -131,6 +148,24 @@ export default function OperationsPage() {
     } catch { /* ignore */ }
     finally { setBackupLoading(false); }
   }, [accessToken, isGroupAdmin]);
+
+  const fetchActivityLogs = useCallback(async (page = 1, filter = activityFilter) => {
+    if (!accessToken) return;
+    setActivityLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), limit: String(ACTIVITY_LIMIT) });
+      if (filter.resource) params.set('resource', filter.resource);
+      if (filter.action) params.set('action', filter.action);
+      const res = await fetch(`/api/activity-logs?${params}`, { headers: { Authorization: `Bearer ${accessToken}` } }).then((r) => r.json());
+      if (res.success) {
+        setActivityLogs(res.data ?? []);
+        setActivityTotal(res.meta?.total ?? 0);
+        setActivityPage(page);
+      }
+    } catch { /* ignore */ }
+    finally { setActivityLoading(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken]);
 
   useEffect(() => {
     if (activeTab === 'backup') {
@@ -143,7 +178,11 @@ export default function OperationsPage() {
           .catch(() => {});
       }
     }
-  }, [activeTab, fetchBackupJobs, accessToken, companies.length]);
+    if (activeTab === 'activity') {
+      fetchActivityLogs(1, activityFilter);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Auto-poll when any job is RUNNING / RESTORING / PENDING
   useEffect(() => {
@@ -219,17 +258,24 @@ export default function OperationsPage() {
     }
   }, [accessToken]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // company_admin không có tab System → chuyển sang Nhật ký ngay khi mount
   useEffect(() => {
+    if (!canSeeSystem) setActiveTab('activity');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSeeSystem]);
+
+  useEffect(() => { if (canSeeSystem) fetchData(); }, [fetchData, canSeeSystem]);
+  useEffect(() => {
+    if (!canSeeSystem) return;
     const interval = setInterval(() => fetchData(), REFRESH_INTERVAL * 1000);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchData, canSeeSystem]);
   useEffect(() => {
     const tick = setInterval(() => setCountdown((c) => (c > 0 ? c - 1 : REFRESH_INTERVAL)), 1000);
     return () => clearInterval(tick);
   }, []);
 
-  if (loading) {
+  if (canSeeSystem && loading) {
     return (
       <div className="flex items-center justify-center py-16">
         <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
@@ -237,7 +283,7 @@ export default function OperationsPage() {
     );
   }
 
-  if (error) {
+  if (canSeeSystem && error) {
     return (
       <div className="max-w-6xl mx-auto">
         <div className="bg-danger-tint border border-danger/20 rounded-xl p-4 text-[12px] text-danger">
@@ -248,12 +294,13 @@ export default function OperationsPage() {
     );
   }
 
-  if (!data) return null;
-
-  const { system, online, stats, companies } = data;
-  const maxUsers = Math.max(...companies.map((c) => c.users), 1);
-  const completionPct = stats.totalEnrollments > 0
-    ? Math.round((stats.completedEnrollments / stats.totalEnrollments) * 100)
+  const system        = data?.system;
+  const online        = data?.online;
+  const stats         = data?.stats;
+  const companies     = data?.companies ?? [];
+  const maxUsers      = Math.max(...companies.map((c) => c.users), 1);
+  const completionPct = (stats?.totalEnrollments ?? 0) > 0
+    ? Math.round(((stats?.completedEnrollments ?? 0) / (stats?.totalEnrollments ?? 1)) * 100)
     : 0;
 
   return (
@@ -307,15 +354,16 @@ export default function OperationsPage() {
       )}
 
       {/* Tab switcher */}
-      <div className="flex gap-0.5 bg-surface rounded-xl border border-default shadow-card p-1 max-w-xs">
+      <div className="flex gap-0.5 bg-surface rounded-xl border border-default shadow-card p-1 max-w-sm">
         {[
-          { id: 'system', label: 'Hệ thống', icon: Database },
-          ...(isGroupAdmin ? [{ id: 'backup', label: 'Sao lưu', icon: Archive }] : []),
+          ...(canSeeSystem   ? [{ id: 'system',   label: 'Hệ thống', icon: Database }] : []),
+          { id: 'activity',    label: 'Nhật ký',   icon: ClipboardList },
+          ...(isGroupAdmin   ? [{ id: 'backup',   label: 'Sao lưu',  icon: Archive }]  : []),
         ].map((tab) => {
           const Icon = tab.icon;
           return (
             <button key={tab.id}
-              onClick={() => setActiveTab(tab.id as 'system' | 'backup')}
+              onClick={() => setActiveTab(tab.id as 'system' | 'backup' | 'activity')}
               className={`flex items-center gap-1.5 flex-1 justify-center px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
                 activeTab === tab.id ? 'bg-primary text-white' : 'text-subtle hover:text-content hover:bg-muted'
               }`}>
@@ -442,8 +490,133 @@ export default function OperationsPage() {
         </div>
       )}
 
+      {/* ── ACTIVITY LOG TAB ── */}
+      {activeTab === 'activity' && (
+        <div className="space-y-4">
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={activityFilter.resource}
+              onChange={(e) => {
+                const f = { ...activityFilter, resource: e.target.value };
+                setActivityFilter(f);
+                fetchActivityLogs(1, f);
+              }}
+              className="border border-default rounded-lg px-3 py-1.5 text-[12px] focus:outline-none focus:border-primary bg-surface text-content"
+            >
+              <option value="">Tất cả loại</option>
+              {['user', 'course', 'question_bank', 'learning_path'].map((r) => (
+                <option key={r} value={r}>{
+                  r === 'user' ? 'Người dùng'
+                  : r === 'course' ? 'Khóa học'
+                  : r === 'question_bank' ? 'Ngân hàng câu hỏi'
+                  : 'Lộ trình học'
+                }</option>
+              ))}
+            </select>
+            <select
+              value={activityFilter.action}
+              onChange={(e) => {
+                const f = { ...activityFilter, action: e.target.value };
+                setActivityFilter(f);
+                fetchActivityLogs(1, f);
+              }}
+              className="border border-default rounded-lg px-3 py-1.5 text-[12px] focus:outline-none focus:border-primary bg-surface text-content"
+            >
+              <option value="">Tất cả thao tác</option>
+              <option value="CREATE">Tạo mới</option>
+              <option value="UPDATE">Cập nhật</option>
+              <option value="DELETE">Xóa</option>
+            </select>
+            <button onClick={() => fetchActivityLogs(activityPage, activityFilter)} disabled={activityLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-default rounded-lg text-[12px] text-subtle hover:bg-muted transition-colors disabled:opacity-50">
+              <RefreshCw size={13} className={activityLoading ? 'animate-spin' : ''} /> Làm mới
+            </button>
+            <p className="text-[11px] text-faint ml-auto">Tổng: {activityTotal.toLocaleString()} · tự xóa sau 30 ngày</p>
+          </div>
+
+          {/* Log table */}
+          <div className="bg-surface border border-default rounded-xl shadow-card overflow-hidden">
+            {activityLoading && activityLogs.length === 0 ? (
+              <div className="p-8 text-center text-[12px] text-faint">Đang tải...</div>
+            ) : activityLogs.length === 0 ? (
+              <div className="p-8 text-center text-[12px] text-faint">Chưa có nhật ký nào</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-default bg-muted/40">
+                      <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Thời gian</th>
+                      <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Thao tác</th>
+                      <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Loại</th>
+                      <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Đối tượng</th>
+                      <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Người thực hiện</th>
+                      <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">IP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activityLogs.map((log) => {
+                      const actionStyle = log.action === 'CREATE'
+                        ? 'bg-success-tint text-success'
+                        : log.action === 'DELETE'
+                        ? 'bg-danger-tint text-danger'
+                        : 'bg-primary-tint text-primary';
+                      const actionLabel = log.action === 'CREATE' ? 'Tạo' : log.action === 'UPDATE' ? 'Sửa' : 'Xóa';
+                      const resourceLabel = log.resource === 'user' ? 'Người dùng'
+                        : log.resource === 'course' ? 'Khóa học'
+                        : log.resource === 'question_bank' ? 'Ngân hàng câu hỏi'
+                        : log.resource === 'learning_path' ? 'Lộ trình học'
+                        : log.resource;
+                      return (
+                        <tr key={log.id} className="border-b border-default last:border-0 hover:bg-muted/30 transition-colors">
+                          <td className="px-4 py-2.5 text-[11px] text-subtle whitespace-nowrap">
+                            {new Date(log.createdAt).toLocaleString('vi-VN')}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${actionStyle}`}>{actionLabel}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-[11px] text-subtle">{resourceLabel}</td>
+                          <td className="px-4 py-2.5 text-[11px] text-content max-w-[200px] truncate" title={log.resourceTitle}>
+                            {log.resourceTitle}
+                          </td>
+                          <td className="px-4 py-2.5 text-[11px] text-content">{log.userFullName}</td>
+                          <td className="px-4 py-2.5 text-[10px] text-faint font-mono">{log.ipAddress ?? '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Pagination */}
+          {activityTotal > ACTIVITY_LIMIT && (
+            <div className="flex items-center justify-center gap-2">
+              <button
+                disabled={activityPage <= 1 || activityLoading}
+                onClick={() => fetchActivityLogs(activityPage - 1, activityFilter)}
+                className="flex items-center gap-1 px-3 py-1.5 border border-default rounded-lg text-[12px] text-subtle hover:bg-muted transition-colors disabled:opacity-40"
+              >
+                <ChevronLeft size={13} /> Trước
+              </button>
+              <span className="text-[12px] text-subtle">
+                Trang {activityPage} / {Math.ceil(activityTotal / ACTIVITY_LIMIT)}
+              </span>
+              <button
+                disabled={activityPage >= Math.ceil(activityTotal / ACTIVITY_LIMIT) || activityLoading}
+                onClick={() => fetchActivityLogs(activityPage + 1, activityFilter)}
+                className="flex items-center gap-1 px-3 py-1.5 border border-default rounded-lg text-[12px] text-subtle hover:bg-muted transition-colors disabled:opacity-40"
+              >
+                Sau <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── SYSTEM TAB ── */}
-      {activeTab === 'system' && <>
+      {activeTab === 'system' && canSeeSystem && <>
 
       {/* Meta bar */}
       <div className="flex items-center justify-between">
@@ -458,11 +631,11 @@ export default function OperationsPage() {
 
       {/* Key metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatCard label="Đang online"   value={online.total}         sub={`Trong ${online.windowMinutes} phút qua`} color="text-success" />
-        <StatCard label="Người dùng"    value={stats.activeUsers}    sub={`/ ${stats.totalUsers.toLocaleString()} tổng`} />
-        <StatCard label="Khóa học"      value={stats.totalCourses} />
-        <StatCard label="Ghi danh"      value={stats.totalEnrollments} />
-        <StatCard label="Hoàn thành"    value={`${completionPct}%`}  sub={`${stats.completedEnrollments.toLocaleString()} khóa`} />
+        <StatCard label="Đang online"   value={online!.total}         sub={`Trong ${online!.windowMinutes} phút qua`} color="text-success" />
+        <StatCard label="Người dùng"    value={stats!.activeUsers}    sub={`/ ${stats!.totalUsers.toLocaleString()} tổng`} />
+        <StatCard label="Khóa học"      value={stats!.totalCourses} />
+        <StatCard label="Ghi danh"      value={stats!.totalEnrollments} />
+        <StatCard label="Hoàn thành"    value={`${completionPct}%`}  sub={`${stats!.completedEnrollments.toLocaleString()} khóa`} />
       </div>
 
       {/* System resources */}
@@ -475,27 +648,27 @@ export default function OperationsPage() {
               <div className="flex justify-between text-[12px] mb-1.5">
                 <span className="text-subtle">RAM hệ thống</span>
                 <span className="font-medium text-content">
-                  {system.memory.usedMB.toLocaleString()} / {system.memory.totalMB.toLocaleString()} MB
-                  <span className="text-faint ml-1">({system.memory.usedPct}%)</span>
+                  {system!.memory.usedMB.toLocaleString()} / {system!.memory.totalMB.toLocaleString()} MB
+                  <span className="text-faint ml-1">({system!.memory.usedPct}%)</span>
                 </span>
               </div>
-              <MemBar pct={system.memory.usedPct} />
+              <MemBar pct={system!.memory.usedPct} />
             </div>
             <div>
               <div className="flex justify-between text-[12px] mb-1.5">
                 <span className="text-subtle">Process Node.js (RSS)</span>
-                <span className="font-medium text-content">{system.memory.processMB} MB</span>
+                <span className="font-medium text-content">{system!.memory.processMB} MB</span>
               </div>
-              <MemBar pct={Math.round((system.memory.processMB / system.memory.totalMB) * 100)} variant="primary" />
+              <MemBar pct={Math.round((system!.memory.processMB / system!.memory.totalMB) * 100)} variant="primary" />
             </div>
             <div>
               <div className="flex justify-between text-[12px] mb-1.5">
                 <span className="text-subtle">Heap V8</span>
                 <span className="font-medium text-content">
-                  {system.memory.heapUsedMB} / {system.memory.heapTotalMB} MB
+                  {system!.memory.heapUsedMB} / {system!.memory.heapTotalMB} MB
                 </span>
               </div>
-              <MemBar pct={Math.round((system.memory.heapUsedMB / Math.max(system.memory.heapTotalMB, 1)) * 100)} variant="primary" />
+              <MemBar pct={Math.round((system!.memory.heapUsedMB / Math.max(system!.memory.heapTotalMB, 1)) * 100)} variant="primary" />
             </div>
           </div>
         </div>
@@ -505,10 +678,10 @@ export default function OperationsPage() {
           <h2 className="text-[13px] font-medium text-content">Thông tin server</h2>
           <dl className="space-y-2">
             {[
-              ['Uptime',    fmtUptime(system.uptimeSeconds)],
-              ['Node.js',   system.nodeVersion],
-              ['Platform',  system.platform],
-              ['RAM trống', `${system.memory.freeMB.toLocaleString()} MB`],
+              ['Uptime',    fmtUptime(system!.uptimeSeconds)],
+              ['Node.js',   system!.nodeVersion],
+              ['Platform',  system!.platform],
+              ['RAM trống', `${system!.memory.freeMB.toLocaleString()} MB`],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between border-b border-default pb-2 last:border-0">
                 <span className="text-[12px] text-subtle">{k}</span>
@@ -518,7 +691,7 @@ export default function OperationsPage() {
           </dl>
           <div>
             {(() => {
-              const pct = system.memory.usedPct;
+              const pct = system!.memory.usedPct;
               const cls = pct < 70
                 ? 'bg-success-tint text-success'
                 : pct < 85

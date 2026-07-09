@@ -5,6 +5,7 @@ import { useToast } from '@/components/ui/toast';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, X } from 'lucide-react';
+import { OrgChartViewer } from '@/components/org-chart/OrgChartViewer';
 
 interface OrgDetail {
   id: string;
@@ -34,6 +35,7 @@ const ROLE_LABEL: Record<string, string> = {
   group_hrm: 'HRM tập đoàn',
   company_admin: 'Quản trị công ty',
   hr_manager: 'Quản lý HR',
+  dept_head: 'Trưởng bộ phận',
   instructor: 'Giảng viên',
   learner: 'Học viên',
 };
@@ -608,14 +610,13 @@ export default function OrgDetailPage() {
       )}
 
       {/* Tab: Org chart */}
-      {activeTab === 'orgchart' && (
-        <div className="bg-surface border border-default rounded-xl shadow-card overflow-hidden">
-          <p className="text-[11px] text-faint p-3 text-center">
-            Sơ đồ tổ chức — dùng trang Import để tải sơ đồ theo cấu trúc phòng ban
-          </p>
-          <div className="flex flex-col gap-3 px-6 py-4">
-            <OrgTree nodes={org.children ?? []} />
-          </div>
+      {activeTab === 'orgchart' && accessToken && (
+        <div className="border border-default rounded-xl shadow-card overflow-hidden" style={{ height: 640 }}>
+          <OrgChartViewer
+            companyId={org.companyId ?? org.id}
+            accessToken={accessToken}
+            canEdit={canEdit}
+          />
         </div>
       )}
 
@@ -655,6 +656,7 @@ export default function OrgDetailPage() {
                   {isGroupAdmin && <option value="group_hrm">HRM tập đoàn</option>}
                   <option value="company_admin">Quản trị công ty</option>
                   <option value="hr_manager">Quản lý HR</option>
+                  <option value="dept_head">Trưởng bộ phận</option>
                   <option value="instructor">Giảng viên</option>
                   <option value="learner">Học viên</option>
                 </select>

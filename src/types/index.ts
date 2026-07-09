@@ -7,6 +7,7 @@ export type RoleType =
   | 'group_hrm'
   | 'company_admin'
   | 'hr_manager'
+  | 'dept_head'
   | 'instructor'
   | 'learner';
 

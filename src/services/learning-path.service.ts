@@ -3,9 +3,13 @@ import { AppError } from '@/lib/errors';
 
 // ─── Learning Path CRUD ───────────────────────────────────────────────────────
 
-export async function getLearningPaths(companyId: string, isActive?: boolean) {
+export async function getLearningPaths(companyId: string, isActive?: boolean, scopedUserIds?: string[] | null) {
   return prisma.learningPath.findMany({
-    where: { companyId, ...(isActive !== undefined ? { isActive } : {}) },
+    where: {
+      companyId,
+      ...(isActive !== undefined ? { isActive } : {}),
+      ...(scopedUserIds != null ? { createdById: { in: scopedUserIds } } : {}),
+    },
     include: {
       _count: { select: { steps: true, enrollments: true } },
       positions: { select: { id: true, title: true, code: true } },
@@ -38,8 +42,9 @@ export async function getLearningPath(id: string, companyId: string) {
 export async function createLearningPath(
   companyId: string,
   data: { name: string; description?: string; totalDeadlineDays?: number },
+  userId?: string,
 ) {
-  return prisma.learningPath.create({ data: { companyId, ...data } });
+  return prisma.learningPath.create({ data: { companyId, createdById: userId ?? null, ...data } });
 }
 
 export async function updateLearningPath(

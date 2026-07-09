@@ -27,7 +27,7 @@ const fetcher = (url: string, token: string) =>
 const COLOR_PRESETS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4', '#EC4899', '#6366F1'];
 
 export default function QuestionBankDetailPage({ params }: { params: { id: string } }) {
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<Tab>('all');
   const [showImport, setShowImport] = useState(false);
@@ -213,6 +213,7 @@ export default function QuestionBankDetailPage({ params }: { params: { id: strin
           accessToken={accessToken!}
           refreshTrigger={refreshTrigger}
           categories={categories}
+          userId={user?.id}
           onEdit={(q) => {
             setEditingQuestion({
               id: q.id,

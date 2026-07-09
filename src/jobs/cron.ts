@@ -54,6 +54,20 @@ export function registerCronJobs() {
     }
   });
 
+  // Purge activity logs older than 30 days (daily at 03:00)
+  cron.schedule('0 3 * * *', async () => {
+    try {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 30);
+      const { count } = await prisma.activityLog.deleteMany({
+        where: { createdAt: { lt: cutoff } },
+      });
+      if (count > 0) console.log(`[Cron] Purged ${count} activity log entries older than 30 days`);
+    } catch (err) {
+      console.error('[Cron] activityLog purge error:', err);
+    }
+  });
+
   // Backup — schedule loaded from DB config (daily 02:00 default)
   (async () => {
     try {
@@ -75,5 +89,5 @@ export function registerCronJobs() {
     }
   })();
 
-  console.log('[Cron] Jobs registered (quiz auto-submit every 5min, group sync every hour, path step unlock daily, backup scheduled)');
+  console.log('[Cron] Jobs registered (quiz auto-submit every 5min, group sync every hour, path step unlock daily, activity log purge daily, backup scheduled)');
 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withRole } from '@/middleware/require-role';
 import { getUsers, createUser, createUserSchema } from '@/services/user.service';
+import { logActivity, getClientIp } from '@/lib/activity-logger';
+import { prisma } from '@/lib/prisma';
 import { handleApiError } from '@/app/api/error-handler';
 import { ValidationError } from '@/lib/errors';
 import { sendWelcomeEmail } from '@/services/email.service';
@@ -43,6 +45,14 @@ export const POST = withRole(
         sendWelcomeEmail(newUser.email, newUser.fullName, plainPassword, `${baseUrl}/login`, `${baseUrl}/app`)
           .catch((e) => console.error('[Email] Gửi welcome email thất bại:', e));
       }
+
+      const dbUser = await prisma.user.findUnique({ where: { id: user.id }, select: { fullName: true } });
+      logActivity({
+        companyId, userId: user.id, userFullName: dbUser?.fullName ?? '',
+        action: 'CREATE', resource: 'user',
+        resourceId: newUser.id, resourceTitle: newUser.fullName,
+        ipAddress: getClientIp(req),
+      });
 
       return NextResponse.json({ success: true, data: newUser }, { status: 201 });
     } catch (err) {

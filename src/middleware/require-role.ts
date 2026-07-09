@@ -60,7 +60,7 @@ export function withRole(
  */
 export function withAuth(handler: RouteHandler) {
   return withRole(
-    ['group_admin', 'group_hrm', 'company_admin', 'hr_manager', 'instructor', 'learner'],
+    ['group_admin', 'group_hrm', 'company_admin', 'hr_manager', 'dept_head', 'instructor', 'learner'],
     handler,
   );
 }

@@ -192,6 +192,7 @@ const NAV_BY_ROLE: Record<string, NavGroup[]> = {
       label: 'Hệ thống',
       items: [
         { label: 'Cài đặt',            href: '/settings',               icon: Settings },
+        { label: 'Nhật ký hoạt động',  href: '/operations',             icon: ClipboardList },
       ],
     },
   ],
@@ -277,6 +278,15 @@ NAV_BY_ROLE.group_hrm = NAV_BY_ROLE.hr_manager
 
 // Thứ tự ưu tiên role khi user có nhiều roles
 const ROLE_PRIORITY = ['group_admin', 'company_admin', 'group_hrm', 'hr_manager', 'instructor', 'learner']
+
+// Mục học tập cá nhân — thêm vào sidebar khi user có role learner + role khác
+const LEARNER_EXTRA: NavGroup = {
+  label: 'Học tập của tôi',
+  items: [
+    { label: 'Khóa học của tôi',  href: '/my-courses',       icon: BookOpen },
+    { label: 'Lộ trình của tôi',  href: '/my-learning-paths', icon: Map },
+  ],
+}
 
 // ─── Sidebar ─────────────────────────────────────────────────────
 function Sidebar({
@@ -400,7 +410,7 @@ function UserMenu() {
     .toUpperCase()
 
   const primaryRole = ROLE_PRIORITY.find((r) =>
-    user.roles.some((ur) => ur.role === r),
+    user.roles.some((ur) => (typeof ur === 'string' ? ur : (ur as { role: string }).role) === r),
   ) ?? 'learner'
   const roleLabel = ROLE_LABELS[primaryRole] ?? primaryRole
 
@@ -574,9 +584,18 @@ export function WebShell({ children }: { children: React.ReactNode }) {
   if (isLoading) return <LoadingScreen />
   if (!user) return null
 
-  const userRoles = user.roles.map((r) => r.role)
+  // roles có thể là string[] (từ login) hoặc {role: string}[] (từ /api/auth/me)
+  const userRoles = user.roles.map((r) =>
+    typeof r === 'string' ? r : (r as { role: string }).role
+  )
   const primaryRole = ROLE_PRIORITY.find((r) => userRoles.includes(r)) ?? 'learner'
-  const navGroups = NAV_BY_ROLE[primaryRole] ?? NAV_BY_ROLE.learner
+  const baseNavGroups = NAV_BY_ROLE[primaryRole] ?? NAV_BY_ROLE.learner
+
+  // Nếu user có learner role nhưng primary role là instructor/admin → thêm section học tập cá nhân
+  const navGroups =
+    primaryRole !== 'learner' && userRoles.includes('learner')
+      ? [...baseNavGroups, LEARNER_EXTRA]
+      : baseNavGroups
 
   const pageTitle = getPageTitle(pathname)
 

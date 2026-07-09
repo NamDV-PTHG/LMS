@@ -134,6 +134,9 @@ export function validateUserRows(rows: UserRow[]): ImportError[] {
     if (!validRoles.includes(row.role)) {
       errors.push({ row: rowNum, column: 'role', value: row.role, message: `Role phải là: ${validRoles.join('/')}` });
     }
+    if (!row.orgCode) {
+      errors.push({ row: rowNum, column: 'orgCode', value: row.orgCode, message: 'Mã phòng ban (orgCode) không được trống — người dùng sẽ không thuộc phòng ban nào nếu thiếu cột này' });
+    }
     if (emails.has(row.email)) {
       errors.push({ row: rowNum, column: 'email', value: row.email, message: `Email "${row.email}" bị trùng` });
     }

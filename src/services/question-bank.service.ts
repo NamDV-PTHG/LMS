@@ -30,9 +30,12 @@ export const updateQuestionSchema = createQuestionSchema.partial().extend({
 
 // ── Bank CRUD ─────────────────────────────────────────────────
 
-export async function getQuestionBanks(companyId: string) {
+export async function getQuestionBanks(companyId: string, scopedUserIds?: string[] | null) {
   return prisma.questionBank.findMany({
-    where: { ownerCompanyId: companyId },
+    where: {
+      ownerCompanyId: companyId,
+      ...(scopedUserIds != null ? { createdById: { in: scopedUserIds } } : {}),
+    },
     include: {
       _count: { select: { questions: true } },
     },
@@ -47,9 +50,9 @@ export async function getQuestionBank(bankId: string, companyId: string) {
   return bank;
 }
 
-export async function createQuestionBank(companyId: string, data: z.infer<typeof createBankSchema>) {
+export async function createQuestionBank(companyId: string, data: z.infer<typeof createBankSchema>, userId?: string) {
   return prisma.questionBank.create({
-    data: { ownerCompanyId: companyId, name: data.name, description: data.description },
+    data: { ownerCompanyId: companyId, createdById: userId ?? null, name: data.name, description: data.description },
   });
 }
 
@@ -72,6 +75,7 @@ export interface QuestionFilter {
   tag?: string;
   search?: string;
   categoryId?: string;
+  createdById?: string;
   page?: number;
   limit?: number;
 }
@@ -91,6 +95,7 @@ export async function getQuestions(bankId: string, companyId: string, filter: Qu
     ...(filter.tag && { tags: { has: filter.tag } }),
     ...(filter.search && { questionText: { contains: filter.search, mode: 'insensitive' as const } }),
     ...(filter.categoryId && { categoryId: filter.categoryId }),
+    ...(filter.createdById && { createdById: filter.createdById }),
   };
 
   const [questions, total] = await Promise.all([

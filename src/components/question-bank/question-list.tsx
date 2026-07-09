@@ -27,6 +27,7 @@ interface QuestionListProps {
   onEdit: (q: Question) => void;
   refreshTrigger?: number;
   categories?: QuestionCategory[];
+  userId?: string;
 }
 
 const DIFFICULTY_BADGE: Record<string, string> = {
@@ -53,11 +54,12 @@ const TYPE_LABEL: Record<string, string> = {
   fill_blank: 'Điền chỗ trống',
 };
 
-export function QuestionList({ bankId, accessToken, onEdit, refreshTrigger, categories = [] }: QuestionListProps) {
+export function QuestionList({ bankId, accessToken, onEdit, refreshTrigger, categories = [], userId }: QuestionListProps) {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ type: '', difficulty: '', status: '', search: '', categoryId: '' });
+  const [onlyMine, setOnlyMine] = useState(false);
   const [page, setPage] = useState(1);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; qId: string }>({ open: false, qId: '' });
   const [rejectDialog, setRejectDialog] = useState<{ open: boolean; qId: string; comment: string }>({ open: false, qId: '', comment: '' });
@@ -70,6 +72,7 @@ export function QuestionList({ bankId, accessToken, onEdit, refreshTrigger, cate
     if (filters.status) sp.set('status', filters.status);
     if (filters.search) sp.set('search', filters.search);
     if (filters.categoryId) sp.set('categoryId', filters.categoryId);
+    if (onlyMine && userId) sp.set('createdById', userId);
     sp.set('page', String(page));
     sp.set('limit', '20');
 
@@ -81,7 +84,7 @@ export function QuestionList({ bankId, accessToken, onEdit, refreshTrigger, cate
     setLoading(false);
   };
 
-  useEffect(() => { fetchQuestions(); }, [filters, page, refreshTrigger]);
+  useEffect(() => { fetchQuestions(); }, [filters, page, refreshTrigger, onlyMine]);
 
   const handleAction = async (qId: string, action: string, comment?: string) => {
     const body: Record<string, string> = { action };
@@ -159,6 +162,16 @@ export function QuestionList({ bankId, accessToken, onEdit, refreshTrigger, cate
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
+        )}
+        {userId && (
+          <button
+            onClick={() => { setOnlyMine((v) => !v); setPage(1); }}
+            className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+              onlyMine ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            Câu hỏi của tôi
+          </button>
         )}
         <span className="text-xs text-muted-foreground self-center ml-auto">{total} câu hỏi</span>
       </div>

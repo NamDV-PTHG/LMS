@@ -18,7 +18,9 @@ export const createOrgSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
-export const updateOrgSchema = createOrgSchema.partial().omit({ type: true, code: true });
+export const updateOrgSchema = createOrgSchema.partial().omit({ type: true, code: true }).extend({
+  parentId: z.string().uuid().optional().nullable(),
+});
 
 export type CreateOrgInput = z.infer<typeof createOrgSchema>;
 export type UpdateOrgInput = z.infer<typeof updateOrgSchema>;
@@ -126,7 +128,7 @@ export async function getOrganization(id: string, companyId: string, isGroupAdmi
           role: true,
           user: { select: { id: true, fullName: true, jobTitle: true } },
         },
-        take: 20,
+        take: 100,
         orderBy: { assignedAt: 'asc' },
       },
     },
@@ -136,14 +138,28 @@ export async function getOrganization(id: string, companyId: string, isGroupAdmi
     throw new ForbiddenError('Không có quyền xem tổ chức này');
   }
 
+  // Group UserRole rows by user — one user can have multiple roles in same org
+  const userMap = new Map<string, { id: string; fullName: string; jobTitle: string | null; roles: string[] }>();
+  for (const ur of org.users) {
+    const existing = userMap.get(ur.user.id);
+    if (existing) {
+      existing.roles.push(ur.role);
+    } else {
+      userMap.set(ur.user.id, {
+        id: ur.user.id,
+        fullName: ur.user.fullName,
+        jobTitle: ur.user.jobTitle,
+        roles: [ur.role],
+      });
+    }
+  }
+
+  // Rename deptPositions → positions so frontend interface matches
+  const { deptPositions, users: _rawUsers, ...orgRest } = org;
   return {
-    ...org,
-    users: org.users.map((ur) => ({
-      id: ur.user.id,
-      fullName: ur.user.fullName,
-      jobTitle: ur.user.jobTitle,
-      role: ur.role,
-    })),
+    ...orgRest,
+    positions: deptPositions,
+    users: Array.from(userMap.values()),
   };
 }
 

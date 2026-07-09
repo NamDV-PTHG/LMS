@@ -161,6 +161,16 @@ export default function CourseEditorPage() {
   const [importingLessonId, setImportingLessonId] = useState<string | null>(null);
   const [quizImportFile, setQuizImportFile] = useState<File | null>(null);
   const [importingQuiz, setImportingQuiz] = useState(false);
+  const [importStep, setImportStep] = useState<1 | 2 | 3>(1);
+  const [importBankId, setImportBankId] = useState('');
+  const [importCategoryId, setImportCategoryId] = useState('');
+  const [importBanks, setImportBanks] = useState<{ id: string; name: string; _count?: { questions: number } }[]>([]);
+  const [importCategories, setImportCategories] = useState<{ id: string; name: string; color?: string }[]>([]);
+  const [importBanksLoading, setImportBanksLoading] = useState(false);
+  const [newBankName, setNewBankName] = useState('');
+  const [creatingBank, setCreatingBank] = useState(false);
+  const [showNewBankForm, setShowNewBankForm] = useState(false);
+  const [bankSearch, setBankSearch] = useState('');
 
   // Assign tab state
   const [groups, setGroups] = useState<LearningGroup[]>([]);
@@ -867,7 +877,24 @@ export default function CourseEditorPage() {
                                     Soạn câu hỏi
                                   </button>
                                   <button
-                                    onClick={() => { setImportingLessonId(lesson.id); setQuizImportFile(null); }}
+                                    onClick={() => {
+                                      setImportingLessonId(lesson.id);
+                                      setQuizImportFile(null);
+                                      setImportStep(1);
+                                      setImportBankId('');
+                                      setImportCategoryId('');
+                                      setBankSearch('');
+                                      setShowNewBankForm(false);
+                                      setNewBankName('');
+                                      setImportBanksLoading(true);
+                                      Promise.all([
+                                        fetch('/api/question-banks', { headers: { Authorization: `Bearer ${accessToken}` } }).then(r => r.json()),
+                                        fetch('/api/question-categories', { headers: { Authorization: `Bearer ${accessToken}` } }).then(r => r.json()),
+                                      ]).then(([banksRes, catsRes]) => {
+                                        if (banksRes.success) setImportBanks(banksRes.data ?? []);
+                                        if (catsRes.success) setImportCategories(catsRes.data ?? []);
+                                      }).catch(() => {}).finally(() => setImportBanksLoading(false));
+                                    }}
                                     className="text-[11px] text-success px-2 py-0.5 rounded hover:bg-success-tint shrink-0 transition-colors"
                                   >
                                     Import CSV
@@ -1428,95 +1455,242 @@ export default function CourseEditorPage() {
         </div>
       )}
 
-      {/* Quiz Import Modal */}
+      {/* Quiz Import Modal — 3-step wizard */}
       {importingLessonId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md bg-surface rounded-xl shadow-card border border-default">
-            <div className="px-5 py-4 border-b border-default flex items-center justify-between">
-              <h2 className="text-[14px] font-medium text-content">Import câu hỏi từ CSV</h2>
-              <button
-                onClick={() => setImportingLessonId(null)}
-                className="text-faint hover:text-content text-xl leading-none transition-colors"
-              >
-                ×
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <p className="text-[12px] text-subtle">
-                Tải file mẫu, điền câu hỏi theo format, rồi import vào hệ thống.
-              </p>
-              <button
-                type="button"
-                onClick={async () => {
-                  const res = await fetch(`/api/lessons/${importingLessonId}/quiz-import`, {
-                    headers: { Authorization: `Bearer ${accessToken}` },
-                  });
-                  if (!res.ok) { toast('error', 'Không tải được file mẫu'); return; }
-                  const blob = await res.blob();
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url; a.download = 'quiz_import_template.csv'; a.click();
-                  URL.revokeObjectURL(url);
-                }}
-                className="inline-flex items-center gap-2 text-[12px] text-primary hover:text-primary-dark font-medium transition-colors"
-              >
-                ↓ Tải file mẫu CSV
-              </button>
+          <div className="w-full max-w-lg bg-surface rounded-xl shadow-card border border-default flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-default flex items-center justify-between flex-shrink-0">
               <div>
-                <label className="block text-[12px] font-medium text-content mb-1">Chọn file CSV đã điền</label>
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={(e) => setQuizImportFile(e.target.files?.[0] ?? null)}
-                  className="block w-full text-[12px] text-subtle file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border file:border-default file:text-[11px] file:bg-muted hover:file:bg-primary-tint file:text-subtle"
-                />
+                <h2 className="text-[14px] font-medium text-content">Import câu hỏi từ CSV</h2>
+                <p className="text-[11px] text-subtle mt-0.5">Bước {importStep} / 3</p>
               </div>
-              <div className="bg-primary-tint border border-primary/15 rounded-lg px-3 py-2 text-[11px] text-primary space-y-1">
-                <p className="font-medium">Cột trong file CSV:</p>
-                <p>question, type, option_a…d, correct_answer, difficulty, explanation, points</p>
-                <p>type: <code>single_choice</code> | <code>true_false</code> | <code>fill_blank</code></p>
-                <p>correct_answer: A/B/C/D (single_choice), true/false (true_false), text (fill_blank)</p>
-              </div>
-              <div className="flex gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setImportingLessonId(null)}
-                  className="flex-1 rounded-lg border border-default px-4 py-2 text-[12px] font-medium text-subtle hover:bg-muted transition-colors"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="button"
-                  disabled={!quizImportFile || importingQuiz}
-                  onClick={async () => {
-                    if (!quizImportFile) return;
-                    setImportingQuiz(true);
-                    const fd = new FormData();
-                    fd.append('file', quizImportFile);
-                    try {
-                      const res = await fetch(`/api/lessons/${importingLessonId}/quiz-import`, {
-                        method: 'POST',
-                        headers: { Authorization: `Bearer ${accessToken}` },
-                        body: fd,
-                      }).then((r) => r.json());
-                      if (res.success) {
-                        toast('success', `Import thành công ${res.data.imported} câu hỏi`);
-                        setImportingLessonId(null);
-                      } else {
-                        toast('error', res.error ?? 'Import thất bại');
-                      }
-                    } catch {
-                      toast('error', 'Lỗi kết nối server');
-                    } finally {
-                      setImportingQuiz(false);
-                    }
-                  }}
-                  className="flex-1 rounded-lg bg-success hover:bg-success/90 px-4 py-2 text-[12px] font-medium text-white disabled:opacity-50 transition-colors"
-                >
-                  {importingQuiz ? 'Đang import...' : 'Import'}
-                </button>
-              </div>
+              <button
+                onClick={() => { setImportingLessonId(null); setImportStep(1); setImportBankId(''); setImportCategoryId(''); setQuizImportFile(null); setBankSearch(''); setShowNewBankForm(false); }}
+                className="text-faint hover:text-content text-xl leading-none transition-colors"
+              >×</button>
             </div>
+
+            {/* Step 1 — Chọn ngân hàng */}
+            {importStep === 1 && (
+              <div className="flex flex-col flex-1 min-h-0">
+                <div className="px-5 pt-4 pb-2 flex-shrink-0">
+                  <p className="text-[12px] font-medium text-content mb-3">Chọn ngân hàng câu hỏi để lưu câu hỏi vào:</p>
+                  <input
+                    type="text"
+                    value={bankSearch}
+                    onChange={(e) => setBankSearch(e.target.value)}
+                    placeholder="🔍 Tìm ngân hàng..."
+                    className="w-full px-3 py-2 text-[12px] border border-default rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 bg-surface"
+                  />
+                </div>
+                <div className="flex-1 overflow-y-auto px-4 pb-2 min-h-0">
+                  {importBanksLoading ? (
+                    <p className="text-[12px] text-subtle text-center py-4">Đang tải...</p>
+                  ) : importBanks.filter(b => b.name.toLowerCase().includes(bankSearch.toLowerCase())).length === 0 && !showNewBankForm ? (
+                    <p className="text-[12px] text-subtle text-center py-4">Chưa có ngân hàng nào. Hãy tạo mới bên dưới.</p>
+                  ) : (
+                    importBanks.filter(b => b.name.toLowerCase().includes(bankSearch.toLowerCase())).map((bank) => (
+                      <button
+                        key={bank.id}
+                        onClick={() => setImportBankId(bank.id)}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg mb-1 text-left transition-colors border ${
+                          importBankId === bank.id ? 'bg-primary-tint border-primary/30 text-primary' : 'border-transparent hover:bg-muted text-content'
+                        }`}
+                      >
+                        <span className="text-[12px] font-medium">{bank.name}</span>
+                        <span className="text-[11px] text-subtle">{bank._count?.questions ?? 0} câu</span>
+                      </button>
+                    ))
+                  )}
+
+                  {/* Inline create bank form */}
+                  {showNewBankForm ? (
+                    <div className="mt-2 p-3 border border-dashed border-primary/30 rounded-lg bg-primary-tint/50">
+                      <p className="text-[11px] font-medium text-primary mb-2">Tạo ngân hàng mới</p>
+                      <input
+                        type="text"
+                        value={newBankName}
+                        onChange={(e) => setNewBankName(e.target.value)}
+                        placeholder="Tên ngân hàng câu hỏi..."
+                        className="w-full px-3 py-1.5 text-[12px] border border-default rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 bg-surface mb-2"
+                        autoFocus
+                        onKeyDown={(e) => e.key === 'Enter' && newBankName.trim() && !creatingBank && (async () => {
+                          setCreatingBank(true);
+                          const res = await fetch('/api/question-banks', {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: newBankName.trim() }),
+                          }).then(r => r.json());
+                          if (res.success) {
+                            setImportBanks(prev => [...prev, res.data]);
+                            setImportBankId(res.data.id);
+                            setNewBankName(''); setShowNewBankForm(false);
+                          } else { toast('error', res.error ?? 'Không tạo được ngân hàng'); }
+                          setCreatingBank(false);
+                        })()}
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={() => { setShowNewBankForm(false); setNewBankName(''); }} className="text-[11px] text-subtle hover:text-content px-2 py-1">Hủy</button>
+                        <button
+                          disabled={!newBankName.trim() || creatingBank}
+                          onClick={async () => {
+                            setCreatingBank(true);
+                            const res = await fetch('/api/question-banks', {
+                              method: 'POST',
+                              headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ name: newBankName.trim() }),
+                            }).then(r => r.json());
+                            if (res.success) {
+                              setImportBanks(prev => [...prev, res.data]);
+                              setImportBankId(res.data.id);
+                              setNewBankName(''); setShowNewBankForm(false);
+                            } else { toast('error', res.error ?? 'Không tạo được ngân hàng'); }
+                            setCreatingBank(false);
+                          }}
+                          className="text-[11px] text-white bg-primary hover:bg-primary-dark px-3 py-1 rounded-lg disabled:opacity-40"
+                        >
+                          {creatingBank ? 'Đang tạo...' : 'Tạo'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowNewBankForm(true)}
+                      className="w-full mt-2 py-2 text-[12px] text-primary border border-dashed border-primary/30 rounded-lg hover:bg-primary-tint transition-colors"
+                    >
+                      + Tạo ngân hàng mới
+                    </button>
+                  )}
+                </div>
+                <div className="px-5 py-4 border-t border-default flex gap-3 flex-shrink-0">
+                  <button onClick={() => { setImportingLessonId(null); setImportStep(1); }} className="flex-1 rounded-lg border border-default px-4 py-2 text-[12px] font-medium text-subtle hover:bg-muted transition-colors">Hủy</button>
+                  <button
+                    disabled={!importBankId}
+                    onClick={() => setImportStep(2)}
+                    className="flex-1 rounded-lg bg-primary hover:bg-primary-dark px-4 py-2 text-[12px] font-medium text-white disabled:opacity-40 transition-colors"
+                  >Tiếp theo →</button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2 — Chọn danh mục */}
+            {importStep === 2 && (
+              <div className="flex flex-col flex-1 min-h-0">
+                <div className="px-5 pt-4 pb-2 flex-shrink-0">
+                  <p className="text-[12px] font-medium text-content mb-1">Chọn danh mục cho câu hỏi <span className="text-subtle font-normal">(không bắt buộc)</span></p>
+                  <p className="text-[11px] text-subtle mb-3">Ngân hàng: <strong className="text-content">{importBanks.find(b => b.id === importBankId)?.name}</strong></p>
+                </div>
+                <div className="flex-1 overflow-y-auto px-4 pb-2 min-h-0">
+                  <button
+                    onClick={() => setImportCategoryId('')}
+                    className={`w-full flex items-center px-3 py-2.5 rounded-lg mb-1 text-left transition-colors border ${
+                      importCategoryId === '' ? 'bg-muted border-gray-300' : 'border-transparent hover:bg-muted'
+                    }`}
+                  >
+                    <span className="text-[12px] text-subtle">Không phân loại</span>
+                  </button>
+                  {importCategories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setImportCategoryId(cat.id)}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg mb-1 text-left transition-colors border ${
+                        importCategoryId === cat.id ? 'bg-primary-tint border-primary/30' : 'border-transparent hover:bg-muted'
+                      }`}
+                    >
+                      {cat.color && <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />}
+                      <span className="text-[12px] font-medium text-content">{cat.name}</span>
+                    </button>
+                  ))}
+                  {importCategories.length === 0 && (
+                    <p className="text-[11px] text-subtle text-center py-3">Chưa có danh mục nào. Có thể tạo tại trang Ngân hàng câu hỏi.</p>
+                  )}
+                </div>
+                <div className="px-5 py-4 border-t border-default flex gap-3 flex-shrink-0">
+                  <button onClick={() => setImportStep(1)} className="flex-1 rounded-lg border border-default px-4 py-2 text-[12px] font-medium text-subtle hover:bg-muted transition-colors">← Quay lại</button>
+                  <button onClick={() => setImportStep(3)} className="flex-1 rounded-lg bg-primary hover:bg-primary-dark px-4 py-2 text-[12px] font-medium text-white transition-colors">Tiếp theo →</button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 3 — Upload CSV */}
+            {importStep === 3 && (
+              <div className="p-5 space-y-4">
+                {/* Summary */}
+                <div className="bg-muted rounded-lg px-3 py-2 text-[11px] text-subtle space-y-0.5">
+                  <p>📦 Ngân hàng: <strong className="text-content">{importBanks.find(b => b.id === importBankId)?.name}</strong></p>
+                  <p>🏷️ Danh mục: <strong className="text-content">{importCategoryId ? importCategories.find(c => c.id === importCategoryId)?.name : 'Không phân loại'}</strong></p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await fetch(`/api/lessons/${importingLessonId}/quiz-import`, {
+                      headers: { Authorization: `Bearer ${accessToken}` },
+                    });
+                    if (!res.ok) { toast('error', 'Không tải được file mẫu'); return; }
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = 'quiz_import_template.csv'; a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="inline-flex items-center gap-2 text-[12px] text-primary hover:text-primary-dark font-medium transition-colors"
+                >
+                  ↓ Tải file mẫu CSV
+                </button>
+                <div>
+                  <label className="block text-[12px] font-medium text-content mb-1">Chọn file CSV đã điền</label>
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={(e) => setQuizImportFile(e.target.files?.[0] ?? null)}
+                    className="block w-full text-[12px] text-subtle file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border file:border-default file:text-[11px] file:bg-muted hover:file:bg-primary-tint file:text-subtle"
+                  />
+                </div>
+                <div className="bg-primary-tint border border-primary/15 rounded-lg px-3 py-2 text-[11px] text-primary space-y-1">
+                  <p className="font-medium">Cột trong file CSV:</p>
+                  <p>question, type, option_a…d, correct_answer, difficulty, explanation, points</p>
+                  <p>type: <code>single_choice</code> | <code>true_false</code> | <code>fill_blank</code></p>
+                  <p>correct_answer: A/B/C/D (single_choice), true/false (true_false), text (fill_blank)</p>
+                </div>
+                <div className="flex gap-3 pt-1">
+                  <button type="button" onClick={() => setImportStep(2)} className="flex-1 rounded-lg border border-default px-4 py-2 text-[12px] font-medium text-subtle hover:bg-muted transition-colors">← Quay lại</button>
+                  <button
+                    type="button"
+                    disabled={!quizImportFile || importingQuiz}
+                    onClick={async () => {
+                      if (!quizImportFile) return;
+                      setImportingQuiz(true);
+                      const fd = new FormData();
+                      fd.append('file', quizImportFile);
+                      fd.append('bankId', importBankId);
+                      if (importCategoryId) fd.append('categoryId', importCategoryId);
+                      try {
+                        const res = await fetch(`/api/lessons/${importingLessonId}/quiz-import`, {
+                          method: 'POST',
+                          headers: { Authorization: `Bearer ${accessToken}` },
+                          body: fd,
+                        }).then((r) => r.json());
+                        if (res.success) {
+                          toast('success', `Import thành công ${res.data.imported} câu hỏi vào "${res.data.bankName}"`);
+                          setImportingLessonId(null); setImportStep(1); setImportBankId(''); setImportCategoryId(''); setQuizImportFile(null); setBankSearch('');
+                        } else {
+                          toast('error', res.error ?? 'Import thất bại');
+                          if (res.details?.length) toast('error', res.details.slice(0, 3).join(' | '));
+                        }
+                      } catch {
+                        toast('error', 'Lỗi kết nối server');
+                      } finally {
+                        setImportingQuiz(false);
+                      }
+                    }}
+                    className="flex-1 rounded-lg bg-success hover:bg-success/90 px-4 py-2 text-[12px] font-medium text-white disabled:opacity-50 transition-colors"
+                  >
+                    {importingQuiz ? 'Đang import...' : 'Import câu hỏi'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

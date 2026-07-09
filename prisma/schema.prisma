@@ -86,6 +86,8 @@ model User {
   jobPosition        JobPosition?            @relation(fields: [jobPositionId], references: [id])
   uploadedAssets      ContentAsset[]
   createdQuestions    Question[]
+  createdBanks         QuestionBank[]  @relation("BanksCreated")
+  createdLearningPaths LearningPath[]  @relation("PathsCreated")
   groupMemberships    GroupMember[]
   positionChangesMade PositionChangeEvent[]   @relation("ChangedBy")
   publishedCourses    CoursePublication[]     @relation("PublishedCourses")
@@ -122,6 +124,7 @@ enum RoleType {
   group_hrm
   company_admin
   hr_manager
+  dept_head
   instructor
   learner
 }
@@ -721,6 +724,7 @@ enum AssessmentSource {
 model LearningPath {
   id                String   @id @default(uuid())
   companyId         String
+  createdById       String?
   code              String?
   name              String
   description       String?
@@ -734,6 +738,7 @@ model LearningPath {
   dependentPaths     LearningPath[]         @relation("PathPrerequisite")
 
   company            Organization             @relation(fields: [companyId], references: [id])
+  createdBy          User?                    @relation("PathsCreated", fields: [createdById], references: [id])
   steps              LearningPathStep[]
   positions          JobPosition[]
   enrollments        LearningPathEnrollment[]
@@ -924,11 +929,13 @@ model GroupCourse {
 model QuestionBank {
   id             String   @id @default(uuid())
   ownerCompanyId String
+  createdById    String?
   name           String
   description    String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  createdBy       User?            @relation("BanksCreated", fields: [createdById], references: [id])
   questions       Question[]
   sourceDocuments SourceDocument[]
 }
@@ -1351,4 +1358,33 @@ enum BackupStatus {
   FAILED
   RESTORING
   RESTORED
+}
+
+// ============================================================
+// ACTIVITY LOG
+// ============================================================
+
+enum ActivityAction {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+model ActivityLog {
+  id            String         @id @default(uuid())
+  companyId     String
+  userId        String
+  userFullName  String
+  action        ActivityAction
+  resource      String         // 'course' | 'user' | 'lesson' | 'question_bank' | 'learning_path' | ...
+  resourceId    String
+  resourceTitle String
+  details       Json?
+  ipAddress     String?
+  createdAt     DateTime       @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, resource])
+  @@index([companyId, userId])
+  @@index([createdAt])
 }
