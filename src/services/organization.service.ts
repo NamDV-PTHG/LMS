@@ -252,21 +252,37 @@ export async function getOrgFlat(companyId: string): Promise<OrgFlat[]> {
 
 /**
  * Get flat list with user/position counts for org chart stats display.
+ * Always includes the company root node itself so the org chart has a proper root.
  */
 export async function getOrgFlatWithStats(companyId: string): Promise<OrgFlat[]> {
-  const orgs = await prisma.organization.findMany({
-    where: { companyId, isActive: true },
-    select: {
-      id: true,
-      name: true,
-      code: true,
-      type: true,
-      parentId: true,
-      _count: { select: { users: true, deptPositions: true } },
-    },
-    orderBy: { displayOrder: 'asc' },
-  });
-  return orgs.map((o) => ({
+  const [root, orgs] = await Promise.all([
+    // Include the company/group root node itself as the anchor of the tree
+    prisma.organization.findUnique({
+      where: { id: companyId },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        type: true,
+        parentId: true,
+        _count: { select: { users: true, deptPositions: true } },
+      },
+    }),
+    prisma.organization.findMany({
+      where: { companyId, isActive: true, id: { not: companyId } },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        type: true,
+        parentId: true,
+        _count: { select: { users: true, deptPositions: true } },
+      },
+      orderBy: { displayOrder: 'asc' },
+    }),
+  ]);
+
+  const toFlat = (o: typeof orgs[0]): OrgFlat => ({
     id: o.id,
     name: o.name,
     code: o.code,
@@ -274,7 +290,11 @@ export async function getOrgFlatWithStats(companyId: string): Promise<OrgFlat[]>
     parentId: o.parentId,
     userCount: o._count.users,
     positionCount: o._count.deptPositions,
-  }));
+  });
+
+  // Root node is the anchor of the tree — force parentId=null so it's always a root
+  const rootFlat = root ? [{ ...toFlat(root), parentId: null }] : [];
+  return [...rootFlat, ...orgs.map(toFlat)];
 }
 
 /**

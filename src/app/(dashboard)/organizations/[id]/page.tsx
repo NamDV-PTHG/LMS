@@ -55,8 +55,9 @@ export default function OrgDetailPage() {
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'orgchart'>('info');
 
   const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', address: '', phone: '', description: '' });
+  const [editForm, setEditForm] = useState({ name: '', address: '', phone: '', description: '', parentId: '' });
   const [saving, setSaving] = useState(false);
+  const [parentOptions, setParentOptions] = useState<{ id: string; name: string; code: string; type: string }[]>([]);
 
   const [showAssignRole, setShowAssignRole] = useState(false);
   const [assignForm, setAssignForm] = useState({ userId: '', role: 'company_admin' });
@@ -94,6 +95,7 @@ export default function OrgDetailPage() {
             address: res.data.address ?? '',
             phone: res.data.phone ?? '',
             description: res.data.description ?? '',
+            parentId: res.data.parentId ?? '',
           });
         } else {
           setError(res.error ?? 'Lỗi tải tổ chức');
@@ -126,19 +128,42 @@ export default function OrgDetailPage() {
       .catch(() => {});
   };
 
+  const loadParentOptions = () => {
+    if (!accessToken) return;
+    fetch(`/api/organizations/${id}/flat`, { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) {
+          // Exclude self from parent candidates
+          setParentOptions((res.data ?? []).filter((o: { id: string }) => o.id !== id));
+        }
+      })
+      .catch(() => {});
+  };
+
   useEffect(() => { loadOrg(); loadUsers(); }, [accessToken, id]); // eslint-disable-line
 
   const handleSave = async () => {
     setSaving(true);
     try {
+      const body: Record<string, unknown> = {
+        name: editForm.name,
+        address: editForm.address || undefined,
+        phone: editForm.phone || undefined,
+        description: editForm.description || undefined,
+      };
+      if (org?.type === 'dept' || org?.type === 'team') {
+        body.parentId = editForm.parentId || null;
+      }
       const res = await fetch(`/api/organizations/${id}`, {
         method: 'PATCH',
         headers: authHeader,
-        body: JSON.stringify(editForm),
+        body: JSON.stringify(body),
       }).then((r) => r.json());
       if (res.success) {
         setOrg({ ...org!, ...res.data });
         setEditing(false);
+        loadOrg(); // reload to sync parentId
         toast('success', 'Đã cập nhật thông tin tổ chức');
       } else {
         toast('error', res.error ?? 'Lỗi cập nhật');
@@ -334,7 +359,7 @@ export default function OrgDetailPage() {
           </div>
           {canEdit && !editing && (
             <button
-              onClick={() => { setEditing(true); setActiveTab('info'); }}
+              onClick={() => { setEditing(true); setActiveTab('info'); loadParentOptions(); }}
               className="px-3 py-1.5 text-[12px] font-medium border border-default rounded-lg text-subtle hover:bg-muted transition-colors"
             >
               Chỉnh sửa
@@ -396,6 +421,23 @@ export default function OrgDetailPage() {
                   placeholder="028 1234 5678"
                 />
               </div>
+              {(org.type === 'dept' || org.type === 'team') && parentOptions.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="block text-[12px] font-medium text-content">Bộ phận quản lý trực tiếp</label>
+                  <select
+                    value={editForm.parentId}
+                    onChange={(e) => setEditForm({ ...editForm, parentId: e.target.value })}
+                    className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-content focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 bg-surface"
+                  >
+                    <option value="">— Không có (trực thuộc công ty) —</option>
+                    {parentOptions.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name} ({o.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <label className="block text-[12px] font-medium text-content">Mô tả</label>
                 <textarea

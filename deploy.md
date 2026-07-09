@@ -3,6 +3,38 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-09 12:30] Fix: Sơ đồ tổ chức mất phòng ban + Edit form thiếu parent selector
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/organization.service.ts` (`getOrgFlatWithStats`): loại root node khỏi query `findMany` (thêm `id: { not: companyId }`) để tránh duplicate — root được thêm riêng với `parentId: null`
+- `src/components/org-chart/OrgChartViewer.tsx` (`computeTreeLayout`): bổ sung `nodeIdSet`; skip edges có `source` không tồn tại trong node set — tránh trường hợp node không được coi là root và bị mất khỏi DFS
+- `src/app/(dashboard)/organizations/[id]/page.tsx`: thêm `parentId` vào `editForm`; thêm `parentOptions` state; load danh sách org khi mở edit; hiển thị dropdown "Bộ phận quản lý trực tiếp" cho dept/team; `handleSave` truyền `parentId` khi lưu
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` — status online
+- Sơ đồ tổ chức hiển thị đầy đủ các phòng ban
+- Form chỉnh sửa phòng ban có dropdown chọn bộ phận cha
+
+## [2026-07-08 15:45] Fix: Sơ đồ tổ chức — khắc phục các bộ phận không hiển thị (parentId NULL)
+
+**Loại:** fix + migration
+
+**Các thay đổi:**
+- `src/services/organization.service.ts` — `getOrgFlatWithStats()`: thêm fetch node root công ty vào kết quả (trước đó bị thiếu vì root có companyId = group_id, không nằm trong WHERE companyId=X); prepend root với parentId=null làm anchor cho React Flow
+- Data fix (chạy trực tiếp qua Prisma): 15 bộ phận của Phú Thái Holdings có parentId=NULL được set lại parentId = company root (64836537...). Gồm: Ban CNTT, Ban Đầu tư, Ban Nhân sự, Ban Pháp chế, Ban Tài chính Kế toán, Ban thư ký, Ban Tổng Giám đốc (x2), Ban Trợ lý, Phòng Hành chính_HCNS, Ban DA Bất động sản, Khối Kiểm soát hoạt động và quản trị, Khối Phát triển kinh doanh, Khối Tài chính - Đầu tư, Khối Truyền thông Đối ngoại
+
+**Kết quả:**
+- Data: 15 organizations updated (parentId set to 64836537-19b3-41a5-bc36-3e0e01486d63)
+- Remaining null-parent orgs: chỉ còn group root "Phú Thái Holdings" và company "Học viện anh ngữ VIA" (đúng)
+- Build: SUCCESS
+- PM2: lms-web restarted, status online (restart #7)
+
+**Lưu ý / Rủi ro:**
+- "Khối Tài chính - Đầu tư" (id=44c13d69) và một dept trùng tên (id=e898dd7a, dưới Ban Tổng Giám đốc) — có 2 entries; cần admin xác nhận có muốn giữ cả 2 hay xóa 1
+- Công ty VIA chưa kiểm tra null-parent orgs (script báo VIA không có null-parent orphans)
+
 ## [2026-07-09 11:30] Fix: Khóa học chia sẻ — phân quyền xem/sửa cho admin công ty và HR
 
 **Loại:** fix

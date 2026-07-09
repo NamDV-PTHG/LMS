@@ -236,8 +236,11 @@ function computeTreeLayout(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges
   // Build adjacency
   const childrenOf = new Map<string, string[]>();
   const parentOf   = new Map<string, string>();
+  const nodeIdSet  = new Set(nodes.map((n) => n.id));
   nodes.forEach((n) => childrenOf.set(n.id, []));
   edges.forEach((e) => {
+    // Skip edges whose source is not in the node set (orphaned / cross-company edges)
+    if (!nodeIdSet.has(e.source)) return;
     childrenOf.get(e.source)?.push(e.target);
     parentOf.set(e.target, e.source);
   });
