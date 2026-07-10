@@ -1,9 +1,10 @@
 'use client';
 
 import { useAuth } from '@/components/providers/auth-provider';
+import { useToast } from '@/components/ui/toast';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Mail, Send } from 'lucide-react';
 
 interface UserRole {
   role: string;
@@ -44,6 +45,7 @@ const inputClass =
 
 export default function UsersPage() {
   const { accessToken, user: currentUser } = useAuth();
+  const { toast } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -64,6 +66,10 @@ export default function UsersPage() {
   const [sendEmail, setSendEmail] = useState(true);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  // Resend welcome email
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [bulkSending, setBulkSending] = useState(false);
 
   const generatePassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#!';
@@ -211,6 +217,53 @@ export default function UsersPage() {
     }
   };
 
+  const handleResend = async (userId: string, userEmail: string) => {
+    setResendingId(userId);
+    try {
+      const res = await fetch(`/api/users/${userId}/resend-welcome`, {
+        method: 'POST',
+        headers: authHeader,
+      }).then((r) => r.json());
+      if (res.success) {
+        if (res.data?.emailSent) {
+          toast('success', `Đã gửi email thông tin đăng nhập đến ${userEmail}`);
+        } else {
+          toast('warning', `Đã đặt mật khẩu mới nhưng email chưa gửi được (${res.data?.emailError ?? 'SMTP chưa cấu hình'})`);
+        }
+      } else {
+        toast('error', res.error ?? 'Gửi email thất bại');
+      }
+    } catch {
+      toast('error', 'Lỗi kết nối server');
+    } finally {
+      setResendingId(null);
+    }
+  };
+
+  const handleBulkSend = async () => {
+    setBulkSending(true);
+    try {
+      const res = await fetch('/api/users/resend-welcome-bulk', {
+        method: 'POST',
+        headers: authHeader,
+      }).then((r) => r.json());
+      if (res.success) {
+        const { sent, failed, total } = res.data;
+        if (failed === 0) {
+          toast('success', `Đã gửi email thành công cho ${sent}/${total} người dùng`);
+        } else {
+          toast('warning', `Gửi xong: ${sent} thành công, ${failed} thất bại (tổng ${total})`);
+        }
+      } else {
+        toast('error', res.error ?? 'Gửi email hàng loạt thất bại');
+      }
+    } catch {
+      toast('error', 'Lỗi kết nối server');
+    } finally {
+      setBulkSending(false);
+    }
+  };
+
   const filtered = users.filter(
     (u) =>
       u.fullName?.toLowerCase().includes(search.toLowerCase()) ||
@@ -256,12 +309,25 @@ export default function UsersPage() {
             </div>
           )}
         </div>
-        <button
-          onClick={openModal}
-          className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg px-3 py-2 transition-colors active:scale-[0.98]"
-        >
-          <Plus size={14} /> Thêm người dùng
-        </button>
+        <div className="flex items-center gap-2">
+          {!isGroupAdmin && (
+            <button
+              onClick={handleBulkSend}
+              disabled={bulkSending}
+              title="Gửi lại email thông tin đăng nhập cho toàn bộ người dùng (sẽ đặt lại mật khẩu tạm thời)"
+              className="flex items-center gap-1.5 border border-default text-subtle text-[12px] font-medium rounded-lg px-3 py-2 hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <Send size={14} />
+              {bulkSending ? 'Đang gửi...' : 'Gửi email tất cả'}
+            </button>
+          )}
+          <button
+            onClick={openModal}
+            className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg px-3 py-2 transition-colors active:scale-[0.98]"
+          >
+            <Plus size={14} /> Thêm người dùng
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -338,9 +404,22 @@ export default function UsersPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Link href={`/users/${u.id}`} className="text-[12px] text-primary hover:underline font-medium">
-                        Chi tiết
-                      </Link>
+                      <div className="flex items-center justify-end gap-3">
+                        <button
+                          onClick={() => handleResend(u.id, u.email)}
+                          disabled={resendingId === u.id || bulkSending}
+                          title="Gửi lại email thông tin đăng nhập (sẽ tạo mật khẩu tạm thời mới)"
+                          className="text-faint hover:text-primary transition-colors disabled:opacity-40"
+                        >
+                          {resendingId === u.id
+                            ? <span className="text-[10px]">Đang gửi...</span>
+                            : <Mail size={14} />
+                          }
+                        </button>
+                        <Link href={`/users/${u.id}`} className="text-[12px] text-primary hover:underline font-medium">
+                          Chi tiết
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}
