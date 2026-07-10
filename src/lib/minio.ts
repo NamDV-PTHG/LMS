@@ -59,6 +59,36 @@ export const BUCKET_PRIVATE = process.env.MINIO_BUCKET_PRIVATE ?? 'lms-private';
 export const BUCKET_TEMP = process.env.MINIO_BUCKET_TEMP ?? 'lms-temp';
 export const SIGNED_URL_TTL = parseInt(process.env.SIGNED_URL_TTL_MINUTES ?? '20', 10) * 60;
 
+// ── Thumbnail URL resolver ─────────────────────────────────────
+
+/**
+ * Convert a stored thumbnailUrl (presigned URL or object name) to a proxy URL
+ * served through /api/public/image.
+ *
+ * Why: presigned MinIO URLs expire after 7 days. Proxying through Next.js
+ * avoids expiry, mixed-content issues, and external port accessibility problems.
+ *
+ * Handles two formats:
+ *  - Legacy: full presigned URL (http://host:9000/bucket/objectName?X-Amz-...)
+ *  - New:    bare object name (thumbnails/courses/{id}/{ts}.jpg)
+ */
+export function resolveThumbnailUrl(rawUrl: string | null | undefined): string | null {
+  if (!rawUrl) return null;
+  if (!rawUrl.startsWith('http')) {
+    // Already a bare object name
+    return `/api/public/image?key=${encodeURIComponent(rawUrl)}`;
+  }
+  try {
+    // Extract object name from presigned URL: /{bucket}/{objectName...}
+    const u = new URL(rawUrl);
+    const objectName = u.pathname.split('/').slice(2).join('/');
+    if (!objectName) return rawUrl;
+    return `/api/public/image?key=${encodeURIComponent(objectName)}`;
+  } catch {
+    return rawUrl;
+  }
+}
+
 // ── Helpers ────────────────────────────────────────────────────
 
 /**

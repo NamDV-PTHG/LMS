@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { cacheAside, invalidateMyCoursesCache, TTL, CACHE_KEYS } from '@/lib/cache';
 import { NotFoundError, ConflictError, ForbiddenError, ValidationError } from '@/lib/errors';
 import { issueCertificate } from './certificate.service';
+import { resolveThumbnailUrl } from '@/lib/minio';
 
 // ── UNION 3 nguồn — raw SQL ───────────────────────────────────
 // Spec Section 8 / CLAUDE.md nguyên tắc #4
@@ -176,7 +177,7 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
     ORDER BY ac."isMandatory" DESC, ac.title
   `;
 
-  return rows;
+  return rows.map((r) => ({ ...r, thumbnailUrl: resolveThumbnailUrl(r.thumbnailUrl) }));
 }
 
 // ── Single course for learner ────────────────────────────────

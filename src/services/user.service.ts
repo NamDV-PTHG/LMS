@@ -333,6 +333,14 @@ export async function removeRole(userId: string, roleId: string, companyId: stri
   const roleRecord = await prisma.userRole.findUnique({ where: { id: roleId } });
   if (!roleRecord || roleRecord.userId !== userId) throw new NotFoundError('Role');
 
+  // Không cho phép xóa vai trò cuối cùng — user sẽ trở thành "vô hình" trong hệ thống
+  const totalRoles = await prisma.userRole.count({ where: { userId } });
+  if (totalRoles <= 1) {
+    throw new ValidationError(
+      'Không thể xóa vai trò cuối cùng của người dùng. Thêm vai trò khác trước hoặc vô hiệu hóa tài khoản.',
+    );
+  }
+
   await prisma.userRole.delete({ where: { id: roleId } });
 
   // Invalidate cached roles

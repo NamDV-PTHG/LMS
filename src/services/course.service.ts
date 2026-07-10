@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { cacheAside, invalidateCourseCache, TTL, CACHE_KEYS } from '@/lib/cache';
 import { NotFoundError, ForbiddenError, ConflictError, ValidationError } from '@/lib/errors';
 import { RoleType } from '@/types';
+import { resolveThumbnailUrl } from '@/lib/minio';
 
 // ── Schemas ───────────────────────────────────────────────────
 
@@ -164,9 +165,10 @@ export async function getCourses(
     prisma.course.count({ where }),
   ]);
 
-  // Gắn flag isShared cho mỗi khóa học
+  // Gắn flag isShared và resolve thumbnailUrl cho mỗi khóa học
   const itemsWithFlag = items.map((c) => ({
     ...c,
+    thumbnailUrl: resolveThumbnailUrl(c.thumbnailUrl),
     isShared: c.isPublished && c.ownerCompanyId !== companyId,
     publications: undefined, // không expose raw relation
   }));
@@ -175,9 +177,9 @@ export async function getCourses(
 }
 
 export async function getCourse(courseId: string, companyId: string, userId: string, roles: RoleType[]) {
-  const course = await assertCourseAccess(courseId, companyId, userId, roles);
+  await assertCourseAccess(courseId, companyId, userId, roles);
 
-  return prisma.course.findUnique({
+  const result = await prisma.course.findUnique({
     where: { id: courseId },
     include: {
       ownerCompany: { select: { id: true, name: true } },
@@ -190,6 +192,9 @@ export async function getCourse(courseId: string, companyId: string, userId: str
       _count: { select: { enrollments: true } },
     },
   });
+
+  if (!result) return result;
+  return { ...result, thumbnailUrl: resolveThumbnailUrl(result.thumbnailUrl) };
 }
 
 export async function createCourse(input: CreateCourseInput, companyId: string, userId: string) {

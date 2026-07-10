@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withRole } from '@/middleware/require-role';
-import { minioClient, BUCKET_PRIVATE, getPresignedDownloadUrl } from '@/lib/minio'; // minioClient for putObject
+import { minioClient, BUCKET_PRIVATE } from '@/lib/minio';
 import { prisma } from '@/lib/prisma';
 import { handleApiError } from '@/app/api/error-handler';
 import { ForbiddenError, NotFoundError } from '@/lib/errors';
@@ -54,16 +54,15 @@ export const POST = withRole(
         'Content-Type': file.type,
       });
 
-      // Presigned URL 7 ngày (max MinIO cho phép).
-      const url = await getPresignedDownloadUrl(objectName, 7 * 24 * 3600);
-
-      // Cập nhật thumbnailUrl trên Course
+      // Lưu object name (không phải presigned URL) để tránh hết hạn sau 7 ngày.
+      // Ảnh được phục vụ qua /api/public/image?key=objectName (proxy server-side).
       await prisma.course.update({
         where: { id: courseId },
-        data: { thumbnailUrl: url },
+        data: { thumbnailUrl: objectName },
       });
 
-      return NextResponse.json({ success: true, data: { thumbnailUrl: url } });
+      const proxyUrl = `/api/public/image?key=${encodeURIComponent(objectName)}`;
+      return NextResponse.json({ success: true, data: { thumbnailUrl: proxyUrl } });
     } catch (err) {
       return handleApiError(err);
     }

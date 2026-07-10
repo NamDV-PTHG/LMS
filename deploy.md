@@ -3,6 +3,47 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-09 12:00] Fix: xóa hết vai trò làm user "biến mất" khỏi hệ thống
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/user.service.ts` `removeRole()`: Đếm số vai trò còn lại trước khi xóa — ném `ValidationError` nếu đây là vai trò cuối cùng
+- `src/app/api/users/[id]/roles/route.ts` DELETE handler: Áp dụng cùng kiểm tra cho endpoint xóa theo role+orgId (deleteMany)
+- `src/app/(dashboard)/users/[id]/page.tsx`: Chặn sớm phía client nếu chỉ còn 1 vai trò; disable nút "Xóa" kèm tooltip giải thích
+
+**Nguyên nhân:**
+- `getUserById()` dùng `user.roles.some(...)` để xác định tenant — khi roles rỗng, `some()` trả `false` → ForbiddenError 403
+- Danh sách users lọc `roles: { some: {} }` nên user không có role cũng không hiện trong list
+- Kết hợp hai điều trên khiến user trông như bị xóa dù record vẫn tồn tại trong DB
+
+**Kết quả:**
+- Build thành công; pm2 restart lms-web → online
+- Nút "Xóa" bị disable khi user chỉ còn 1 vai trò; API trả lỗi rõ ràng nếu cố tình gọi
+
+**Lưu ý / Rủi ro:**
+- Nếu DB đang có user với 0 roles (từ trước fix), cần gán lại role hoặc xóa user thủ công qua prisma studio
+
+## [2026-07-09 11:30] Fix: thumbnail khóa học không hiển thị phía admin
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/lib/minio.ts`: Thêm hàm `resolveThumbnailUrl()` — chuyển presigned URL (hoặc object name) thành URL proxy qua `/api/public/image?key=...`
+- `src/app/api/courses/[id]/thumbnail/route.ts`: Lưu object name vào DB thay vì presigned URL (tránh hết hạn sau 7 ngày)
+- `src/services/course.service.ts`: Import + áp dụng `resolveThumbnailUrl` trong `getCourse()` và `getCourses()`
+- `src/services/enrollment.service.ts`: Áp dụng `resolveThumbnailUrl` vào kết quả SQL raw của `fetchMyCourses()`
+- `src/app/(dashboard)/courses/[id]/page.tsx`: Thêm `thumbnailUrl` và `ownerCompanyId` vào `Course` interface; bỏ type cast thừa
+
+**Kết quả:**
+- Thumbnail được phục vụ qua `/api/public/image` (Next.js server-side proxy) thay vì presigned URL trực tiếp
+- Không còn vấn đề hết hạn URL (7 ngày), mixed content, hay port MinIO không mở ra ngoài
+- Build thành công; `pm2 restart lms-web` → online
+
+**Lưu ý / Rủi ro:**
+- Thumbnail cũ trong DB vẫn là presigned URL — `resolveThumbnailUrl()` tự động extract object name từ URL cũ và convert sang proxy URL
+- `/api/public/image` không yêu cầu auth → phù hợp cho thumbnail (không nhạy cảm)
+
 ## [2026-07-09 14:00] Feature: Thêm chức năng xóa/vô hiệu hóa phòng ban
 
 **Loại:** feature

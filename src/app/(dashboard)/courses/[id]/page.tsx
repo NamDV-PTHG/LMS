@@ -23,9 +23,11 @@ interface Course {
   id: string;
   title: string;
   description: string | null;
+  thumbnailUrl: string | null;
   isPublished: boolean;
   level: string | null;
   estimatedHours: number | null;
+  ownerCompanyId?: string;
   sections: Section[];
 }
 
@@ -117,7 +119,7 @@ export default function CourseEditorPage() {
   const [course, setCourse] = useState<Course | null>(null);
 
   // Khóa học được chia sẻ từ công ty khác → chỉ xem, không sửa
-  const isSharedCourse = !isGroupAdmin && !!course && (course as Course & { ownerCompanyId?: string }).ownerCompanyId !== user?.companyId;
+  const isSharedCourse = !isGroupAdmin && !!course && course.ownerCompanyId !== user?.companyId;
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -582,10 +584,10 @@ export default function CourseEditorPage() {
                 title={isSharedCourse ? 'Không thể chỉnh sửa khóa học được chia sẻ' : 'Nhấn để thay đổi ảnh bìa'}
                 className="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-dashed border-default hover:border-primary transition-colors group bg-gradient-to-br from-muted to-primary-tint flex items-center justify-center"
               >
-                {(course as Course & { thumbnailUrl?: string }).thumbnailUrl ? (
+                {course.thumbnailUrl ? (
                   <>
                     <img
-                      src={(course as Course & { thumbnailUrl?: string }).thumbnailUrl}
+                      src={course.thumbnailUrl}
                       alt={course.title}
                       className="w-full h-full object-cover"
                     />

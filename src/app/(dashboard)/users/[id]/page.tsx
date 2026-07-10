@@ -220,6 +220,10 @@ export default function UserDetailPage() {
   };
 
   const handleRemoveRole = async (roleId: string) => {
+    if (user && user.roles.length <= 1) {
+      setRoleMsg('Không thể xóa vai trò cuối cùng. Thêm vai trò khác trước hoặc vô hiệu hóa tài khoản.');
+      return;
+    }
     setRemovingRoleId(roleId);
     try {
       const res = await fetch(`/api/users/${id}/roles/${roleId}`, {
@@ -530,8 +534,9 @@ export default function UserDetailPage() {
                     <td className="px-3 py-2.5 text-right">
                       <button
                         onClick={() => handleRemoveRole(r.id)}
-                        disabled={removingRoleId === r.id}
-                        className="text-[11px] text-danger hover:underline disabled:opacity-50"
+                        disabled={removingRoleId === r.id || user.roles.length <= 1}
+                        title={user.roles.length <= 1 ? 'Không thể xóa vai trò cuối cùng' : 'Xoá vai trò này'}
+                        className="text-[11px] text-danger hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {removingRoleId === r.id ? 'Đang xoá...' : 'Xoá'}
                       </button>
