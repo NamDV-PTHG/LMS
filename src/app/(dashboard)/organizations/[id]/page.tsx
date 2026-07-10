@@ -58,6 +58,8 @@ export default function OrgDetailPage() {
   const [editForm, setEditForm] = useState({ name: '', address: '', phone: '', description: '', parentId: '' });
   const [saving, setSaving] = useState(false);
   const [parentOptions, setParentOptions] = useState<{ id: string; name: string; code: string; type: string }[]>([]);
+  const [deactivating, setDeactivating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [showAssignRole, setShowAssignRole] = useState(false);
   const [assignForm, setAssignForm] = useState({ userId: '', role: 'company_admin' });
@@ -172,6 +174,49 @@ export default function OrgDetailPage() {
       toast('error', 'Lỗi kết nối server');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeactivate = async () => {
+    setDeactivating(true);
+    try {
+      const res = await fetch(`/api/organizations/${id}/deactivate`, {
+        method: 'POST',
+        headers: authHeader,
+        body: JSON.stringify({}),
+      }).then((r) => r.json());
+      if (res.success) {
+        toast('success', 'Đã vô hiệu hóa phòng ban');
+        router.push('/organizations');
+      } else {
+        toast('error', res.error ?? 'Lỗi vô hiệu hóa');
+      }
+    } catch {
+      toast('error', 'Lỗi kết nối server');
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/organizations/${id}`, {
+        method: 'DELETE',
+        headers: authHeader,
+      }).then((r) => r.json());
+      if (!res.success && res.code === 'HAS_DEPENDENCIES') {
+        toast('warning', res.error ?? 'Không thể xóa vì còn dữ liệu liên quan');
+      } else if (res.success) {
+        toast('success', 'Đã xóa phòng ban');
+        router.push('/organizations');
+      } else {
+        toast('error', res.error ?? 'Lỗi xóa phòng ban');
+      }
+    } catch {
+      toast('error', 'Lỗi kết nối server');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -462,6 +507,35 @@ export default function OrgDetailPage() {
                   {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
                 </button>
               </div>
+
+              {/* Danger zone — chỉ cho dept/team */}
+              {(org.type === 'dept' || org.type === 'team') && (
+                <div className="border border-danger/20 bg-danger-tint/30 rounded-xl p-4 space-y-3 mt-2">
+                  <p className="text-[11px] font-semibold text-danger uppercase tracking-wide">Vùng nguy hiểm</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDeactivate}
+                      disabled={deactivating || deleting}
+                      className="px-3 py-1.5 text-[12px] border border-warning/50 text-warning rounded-lg hover:bg-warning/10 transition-colors disabled:opacity-50"
+                    >
+                      {deactivating ? 'Đang xử lý...' : '⏸ Ngưng hoạt động'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDelete}
+                      disabled={deleting || deactivating}
+                      className="px-3 py-1.5 text-[12px] border border-danger/50 text-danger rounded-lg hover:bg-danger/10 transition-colors disabled:opacity-50"
+                    >
+                      {deleting ? 'Đang xóa...' : '🗑 Xóa phòng ban'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-faint leading-relaxed">
+                    <strong>Ngưng hoạt động:</strong> ẩn khỏi sơ đồ, giữ nguyên lịch sử học tập.<br />
+                    <strong>Xóa:</strong> xóa vĩnh viễn, chỉ thực hiện được khi không còn nhân viên, vị trí hay khóa học liên quan.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

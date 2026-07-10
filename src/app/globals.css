@@ -67,3 +67,8 @@
   .border-default { border-color: rgba(0,0,0,0.08); }
   .divide-default > * + * { border-color: rgba(0,0,0,0.08) !important; }
 }
+
+/* Hide ReactFlow attribution/branding panel */
+.react-flow__attribution {
+  display: none !important;
+}

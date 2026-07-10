@@ -3,6 +3,24 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-09 14:00] Feature: Thêm chức năng xóa/vô hiệu hóa phòng ban
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/components/org-chart/OrgChartViewer.tsx`: Thêm class `group` vào div wrapper của `OrgNodeCard` để nút hover (Vô hiệu hóa, Thêm con, Di chuyển) hiển thị đúng khi hover
+- `src/app/api/organizations/[id]/route.ts`: Thêm DELETE handler — kiểm tra ràng buộc (con, thành viên, vị trí, khóa học), trả 409 nếu còn dữ liệu liên quan, xóa và invalidate cache nếu không có ràng buộc; import thêm `NotFoundError`, `ForbiddenError`, `prisma`, `invalidateOrgCache`
+- `src/app/(dashboard)/organizations/[id]/page.tsx`: Thêm state `deactivating`/`deleting`, handler `handleDeactivate` (POST /deactivate) và `handleDelete` (DELETE), thêm "Vùng nguy hiểm" UI cuối tab Info — chỉ hiện khi `canEdit && !editing && (dept|team)`
+
+**Kết quả:**
+- Nút hover trên org chart node hoạt động đúng
+- API DELETE `/api/organizations/[id]` mới — giới hạn chỉ dept/team, kiểm tra dependency trước khi xóa
+- Trang chi tiết tổ chức có nút "Vô hiệu hóa" và "Xóa phòng ban" trong danger zone
+
+**Lưu ý / Rủi ro:**
+- Xóa là không thể hoàn tác — nhưng đã có guard dependency check (409 nếu còn dữ liệu liên quan)
+- Vô hiệu hóa dùng endpoint `/deactivate` đã tồn tại, không cần migration
+
 ## [2026-07-09 12:30] Fix: Sơ đồ tổ chức mất phòng ban + Edit form thiếu parent selector
 
 **Loại:** fix
