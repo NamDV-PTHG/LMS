@@ -3,6 +3,32 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-12 10:30] Fix: User không có role bị ẩn khỏi danh sách
+
+**Loại:** fix + migration
+
+**Các thay đổi:**
+- `prisma/schema.prisma`: thêm field `companyId String?` vào model `User` — làm tenant anchor để user được gắn với công ty ngay từ khi tạo, kể cả trước khi có role
+- `src/services/user.service.ts` — `getUsers()`: thay `roles:{some:{}}` bằng OR clause: user có role trong công ty đó OR user có `companyId` khớp và chưa có role; group_admin không có filter xem được tất cả kể cả user chưa có role
+- `src/services/user.service.ts` — `getUserById()`: tenant check cũng dùng `companyId` nếu user không có role
+- `src/services/user.service.ts` — `createUser()`: resolve companyId từ org target và ghi vào User khi tạo
+- `src/services/import.service.ts` — `upsertUser()`: luôn set `companyId` khi upsert user qua CSV
+
+**Data migration trên production:**
+- `prisma db push` — thêm column `companyId` vào bảng `User` (nullable, không mất data)
+- Backfill: 22 user có role → lấy companyId từ role đầu tiên; 6 user không có role → set PTH company id
+- Kết quả: `khanh.nv@phuthaiholdings.com` và 5 user gmail test hiện trong danh sách
+
+**Kết quả:**
+- DB migration: thành công
+- Build: thành công
+- PM2 lms-web: restarted, status online (restart #13)
+- Health: 200
+
+**Lưu ý / Rủi ro:**
+- 5 user gmail (tuyen/datlt/long/dungt/tam) đang được gắn vào PTH company — nếu là test accounts thì admin nên deactivate hoặc xóa
+- User không có role vẫn không thể đăng nhập nếu app yêu cầu role để resolve companyId tại middleware — cần assign role qua trang Quản lý người dùng
+
 ## [2026-07-09 12:00] Fix: xóa hết vai trò làm user "biến mất" khỏi hệ thống
 
 **Loại:** fix
