@@ -366,7 +366,7 @@ export async function importUsers(
       ? await bcrypt.hash(row.password, 10)
       : defaultHashedPwd;
 
-    // Upsert user (User model has no companyId — association is via UserRole)
+    // Upsert user — always set companyId so user is tenant-scoped even before role is assigned
     const user = await prisma.user.upsert({
       where: { email: row.email.toLowerCase() },
       update: {
@@ -374,6 +374,7 @@ export async function importUsers(
         jobTitle: row.jobTitle || undefined,
         jobLevel: row.jobLevel || undefined,
         jobPositionId: position?.id ?? undefined,
+        companyId,
       },
       create: {
         email: row.email.toLowerCase(),
@@ -383,6 +384,7 @@ export async function importUsers(
         jobLevel: row.jobLevel || undefined,
         passwordHash,
         jobPositionId: position?.id ?? undefined,
+        companyId,
       },
     });
 

@@ -71,6 +71,7 @@ model User {
   jobLevel             String?
   jobPositionId        String?
   jobPositionChangedAt DateTime?
+  companyId            String?   // tenant anchor — set at creation; used when user has no role yet
   isActive             Boolean   @default(true)
   isExternal           Boolean   @default(false)
   mustChangePassword   Boolean   @default(false)

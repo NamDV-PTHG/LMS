@@ -93,24 +93,42 @@ export async function getUsers(
   const effectiveCompanyId = isGroupAdmin ? (filterCompanyId ?? null) : companyId;
   const applyOrgFilter = !isGroupAdmin || !!filterCompanyId;
 
+  // Build role conditions (org scope + optional filters)
+  const orgCondition =
+    applyOrgFilter && effectiveCompanyId
+      ? {
+          organization: {
+            OR: [
+              { companyId: effectiveCompanyId }, // departments/teams under the company
+              { id: effectiveCompanyId },         // the company org itself
+            ],
+          },
+        }
+      : {};
+  const roleConditions = {
+    ...orgCondition,
+    ...(role ? { role: role as RoleType } : {}),
+    ...(deptId ? { organizationId: deptId } : {}),
+  };
+  const hasExtraFilter = !!(role || deptId);
+
+  // Build WHERE:
+  // - If role/dept filter active → must have matching role (can't filter by dept with no role)
+  // - If company-scoped (company_admin or group_admin+filterCompanyId) → users with roles in that
+  //   company OR users with no roles but companyId matches (created but not yet assigned a role)
+  // - group_admin, no filter → all active users including those without any role
   const where: Record<string, unknown> = {
     isActive: true,
-    roles: {
-      some: {
-        ...(applyOrgFilter && effectiveCompanyId
-          ? {
-              organization: {
-                OR: [
-                  { companyId: effectiveCompanyId },  // departments/teams under the company
-                  { id: effectiveCompanyId },          // the company org itself
-                ],
-              },
-            }
-          : {}),
-        ...(role ? { role: role as RoleType } : {}),
-        ...(deptId ? { organizationId: deptId } : {}),
-      },
-    },
+    ...(hasExtraFilter
+      ? { roles: { some: roleConditions } }
+      : applyOrgFilter && effectiveCompanyId
+      ? {
+          OR: [
+            { roles: { some: roleConditions } },
+            { companyId: effectiveCompanyId, roles: { none: {} } },
+          ],
+        }
+      : {}), // group_admin, no filter → no roles constraint
   };
 
   const [users, total] = await Promise.all([
@@ -157,11 +175,13 @@ export async function getUserById(id: string, companyId: string, isGroupAdmin: b
 
   if (!user || !user.isActive) throw new NotFoundError('User');
 
-  // Tenant check: user must belong to this company
+  // Tenant check: user must belong to this company (via role or companyId anchor)
   if (!isGroupAdmin) {
-    const belongsToCompany = user.roles.some(
-      (r) => r.organization.id === companyId || (r.organization as { companyId?: string }).companyId === companyId,
-    );
+    const belongsToCompany =
+      (user as { companyId?: string | null }).companyId === companyId ||
+      user.roles.some(
+        (r) => r.organization.id === companyId || (r.organization as { companyId?: string }).companyId === companyId,
+      );
     if (!belongsToCompany) throw new ForbiddenError('Không có quyền xem user này');
   }
 
@@ -197,6 +217,13 @@ export async function createUser(input: CreateUserInput, companyId: string, isGr
   const passwordHash = await bcrypt.hash(input.password ?? 'ChangeMe@123', 10);
 
   return prisma.$transaction(async (tx) => {
+    // Resolve companyId from the target org so user is always tenant-scoped
+    const targetOrg = await tx.organization.findUnique({
+      where: { id: input.organizationId },
+      select: { id: true, type: true, companyId: true },
+    });
+    const userCompanyId = targetOrg?.type === 'company' ? targetOrg.id : targetOrg?.companyId ?? companyId;
+
     const user = await tx.user.create({
       data: {
         email: input.email,
@@ -205,6 +232,7 @@ export async function createUser(input: CreateUserInput, companyId: string, isGr
         employeeCode: input.employeeCode,
         jobTitle: input.jobTitle,
         jobLevel: input.jobLevel,
+        companyId: userCompanyId,
       },
     });
 
