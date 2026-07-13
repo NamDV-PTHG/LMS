@@ -3,6 +3,27 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-13 18:50] Fix: Radar chart hiển thị sai user do destructure userId = undefined
+
+**Loại:** fix
+
+**Nguyên nhân gốc:**
+- `/api/my/competency-radar/route.ts` dùng `{ userId, companyId }` để destructure context từ `withRole`
+- Nhưng context chỉ có `{ user, companyId, params }` — không có `userId` field trực tiếp
+- Dẫn đến `userId = undefined`, khiến Prisma `findFirst({ where: { id: undefined } })` bỏ qua filter id và trả về user đầu tiên trong company (không phải người đang đăng nhập)
+- Radar hiển thị dữ liệu của user khác thay vì user đang xem trang
+
+**Các thay đổi:**
+- `src/app/api/my/competency-radar/route.ts`: đổi `{ userId, companyId }` → `{ user, companyId }` và dùng `user.id`
+
+**Kết quả:**
+- API `/api/my/competency-radar` giờ trả đúng dữ liệu của user đang đăng nhập
+- Radar chart cho `nam.dv@phuthaiholdings.com`: 4 axes (framework-level), readinessScore = 15%, 1/9 competency đạt yêu cầu (Kỹ năng đàm phán cấp 3)
+- Build và pm2 restart lms-web thành công
+
+**Lưu ý / Rủi ro:**
+- Bug này ảnh hưởng toàn bộ user xem "Hồ sơ Năng lực" trên trang `/profile` — ai cũng thấy dữ liệu của cùng 1 user khác
+
 ## [2026-07-13 18:30] Fix: PWA shortcut không còn nhảy về giao diện web
 
 **Loại:** fix

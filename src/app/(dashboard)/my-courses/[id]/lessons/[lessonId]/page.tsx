@@ -77,7 +77,7 @@ export default function LessonPlayerPage() {
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
   const [quizLoading, setQuizLoading] = useState(false);
   const [quizSubmitting, setQuizSubmitting] = useState(false);
-  const [quizResult, setQuizResult] = useState<{ score: number; passed: boolean; totalQuestions: number } | null>(null);
+  const [quizResult, setQuizResult] = useState<{ score: number; maxScore: number; scorePct: number; isPassed: boolean; passingScore: number } | null>(null);
 
   // HTML preview cho DOCX: assetId → { html, loading, error }
   const [docHtml, setDocHtml] = useState<Record<string, { html: string | null; loading: boolean; error: string | null }>>({});
@@ -219,18 +219,14 @@ export default function LessonPlayerPage() {
     if (!lesson?.quizId || !quizAttempt) return;
     setQuizSubmitting(true);
     try {
-      const answers = Object.entries(quizAnswers).map(([questionId, answer]) => ({
-        questionId,
-        answer,
-      }));
-      const res = await fetch(`/api/quizzes/${lesson.quizId}/submit`, {
+      const res = await fetch(`/api/quizzes/${quizAttempt.attemptId}/submit`, {
         method: 'POST',
         headers: authHeader,
-        body: JSON.stringify({ attemptId: quizAttempt.attemptId, answers }),
+        body: JSON.stringify({ answers: quizAnswers }),
       }).then((r) => r.json());
       if (res.success) {
         setQuizResult(res.data);
-        if (res.data.passed) handleComplete();
+        if (res.data.isPassed) handleComplete();
       } else {
         toast('error', res.error ?? 'Nộp bài thất bại');
       }
@@ -314,7 +310,7 @@ export default function LessonPlayerPage() {
                       {q.questionText}
                     </p>
                     <div className="space-y-2 pl-4">
-                      {q.options.map((opt) => (
+                      {[...q.options].sort((a, b) => a.key.localeCompare(b.key)).map((opt) => (
                         <label
                           key={opt.key}
                           className="flex items-center gap-2.5 cursor-pointer group"
@@ -348,16 +344,16 @@ export default function LessonPlayerPage() {
 
             {quizResult && (
               <div className="text-center space-y-4">
-                <div className={`text-[40px] font-medium ${quizResult.passed ? 'text-success' : 'text-danger'}`}>
-                  {quizResult.score}%
+                <div className={`text-[40px] font-medium ${quizResult.isPassed ? 'text-success' : 'text-danger'}`}>
+                  {quizResult.scorePct}%
                 </div>
-                <p className={`text-[13px] font-medium ${quizResult.passed ? 'text-success' : 'text-danger'}`}>
-                  {quizResult.passed ? 'Chúc mừng! Bạn đã qua bài kiểm tra.' : 'Chưa đạt. Hãy thử lại.'}
+                <p className={`text-[13px] font-medium ${quizResult.isPassed ? 'text-success' : 'text-danger'}`}>
+                  {quizResult.isPassed ? 'Chúc mừng! Bạn đã qua bài kiểm tra.' : 'Chưa đạt. Hãy thử lại.'}
                 </p>
                 <p className="text-[12px] text-subtle">
-                  {quizResult.score}% / {quizResult.totalQuestions} câu
+                  {quizResult.score}/{quizResult.maxScore} điểm · Điểm đạt: {quizResult.passingScore}%
                 </p>
-                {!quizResult.passed && (
+                {!quizResult.isPassed && (
                   <button
                     onClick={() => { setQuizAttempt(null); setQuizAnswers({}); setQuizResult(null); }}
                     className="px-5 py-2 border border-primary text-primary text-[12px] rounded-lg hover:bg-primary-tint transition-colors"

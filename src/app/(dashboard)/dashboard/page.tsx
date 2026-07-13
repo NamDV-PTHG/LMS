@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import {
   BarChart2, BookOpen, Map, Users, Target, ClipboardList,
-  ArrowRight, TrendingUp,
+  ArrowRight, TrendingUp, Building2, CheckCircle2,
 } from 'lucide-react';
 
 interface QuickStat {
@@ -40,6 +40,10 @@ export default function DashboardPage() {
   const [courseStats, setCourseStats] = useState<CourseEnrollStat[]>([]);
   const [hasLearningPaths, setHasLearningPaths] = useState(false);
 
+  // dept_head: managed orgs overview
+  interface DeptStat { orgId: string; orgName: string; memberCount: number; enrolled: number; completed: number; completionRate: number; avgProgress: number; }
+  const [deptStats, setDeptStats] = useState<DeptStat[]>([]);
+
   const getRole = (r: unknown): string =>
     typeof r === 'string' ? r : (r as { role: string }).role;
 
@@ -47,6 +51,7 @@ export default function DashboardPage() {
   const isGroupAdmin   = userRoles.includes('group_admin');
   const isCompanyAdmin = userRoles.includes('company_admin') || userRoles.includes('hr_manager');
   const isLearner      = userRoles.includes('learner');
+  const isDeptHead     = userRoles.includes('dept_head') && !isGroupAdmin && !isCompanyAdmin;
 
   useEffect(() => {
     if (!user || !accessToken) return;
@@ -95,7 +100,38 @@ export default function DashboardPage() {
         .then((r) => r.json())
         .then((res) => { if (res.success) setCourseStats(res.data ?? []); })
         .catch(() => {});
-    } else if (isLearner) {
+    }
+
+    // dept_head: always fetch managed orgs + children stats (can have other roles too)
+    if (isDeptHead) {
+      fetch('/api/reports/dept', { headers })
+        .then((r) => r.json())
+        .then(async (res) => {
+          if (!res.success || !Array.isArray(res.data)) return;
+          const managed: { id: string; name: string }[] = res.data;
+          const rows: DeptStat[] = [];
+          for (const org of managed) {
+            const childRes = await fetch(`/api/reports/dept/${org.id}?view=children`, { headers }).then((r) => r.json());
+            if (childRes.success && Array.isArray(childRes.data)) {
+              childRes.data.forEach((c: { orgId: string; orgName: string; memberCount: number; enrolled: number; completed: number; completionRate: number; avgProgress: number }) => {
+                rows.push({ orgId: c.orgId, orgName: c.orgName, memberCount: c.memberCount, enrolled: c.enrolled, completed: c.completed, completionRate: c.completionRate, avgProgress: c.avgProgress });
+              });
+            }
+            // If no children, add the managed org itself
+            if (!childRes.success || !Array.isArray(childRes.data) || childRes.data.length === 0) {
+              const empRes = await fetch(`/api/reports/dept/${org.id}?view=employees`, { headers }).then((r) => r.json());
+              const empCount = empRes.success ? (empRes.data ?? []).length : 0;
+              const enrolled = empRes.success ? (empRes.data as { enrolled: number }[]).reduce((s: number, e) => s + e.enrolled, 0) : 0;
+              const completed = empRes.success ? (empRes.data as { completed: number }[]).reduce((s: number, e) => s + e.completed, 0) : 0;
+              rows.push({ orgId: org.id, orgName: org.name, memberCount: empCount, enrolled, completed, completionRate: enrolled > 0 ? Math.round((completed / enrolled) * 100) : 0, avgProgress: 0 });
+            }
+          }
+          setDeptStats(rows);
+        })
+        .catch(() => {});
+    }
+
+    if (isLearner) {
       fetch('/api/my/courses', { headers })
         .then((r) => r.json())
         .then((res) => {
@@ -118,7 +154,7 @@ export default function DashboardPage() {
         })
         .catch(() => {});
     }
-  }, [user, accessToken, isGroupAdmin, isCompanyAdmin, isLearner]);
+  }, [user, accessToken, isGroupAdmin, isCompanyAdmin, isLearner, isDeptHead]); // eslint-disable-line
 
   // Quick nav links per role
   const navLinks = [
@@ -133,6 +169,7 @@ export default function DashboardPage() {
     { href: '/position-changes',      label: 'Thay đổi vị trí',    icon: ArrowRight,   roles: ['group_admin', 'group_hrm', 'company_admin'] },
     { href: '/my-courses',             label: 'Khóa học của tôi',   icon: BookOpen,     roles: ['learner'] },
     { href: '/my-learning-paths',     label: 'Lộ trình của tôi',   icon: Map,          roles: ['learner'] },
+    { href: '/my-department',         label: 'Báo cáo bộ phận',    icon: Building2,    roles: ['dept_head'] },
   ];
 
   const visibleLinks = navLinks.filter((l) => l.roles.some((r) => userRoles.includes(r)));
@@ -269,6 +306,58 @@ export default function DashboardPage() {
           >
             Xem lộ trình <ArrowRight size={13} />
           </Link>
+        </div>
+      )}
+
+      {/* dept_head: Tổng quan bộ phận */}
+      {isDeptHead && (
+        <div className="bg-surface rounded-xl border border-default shadow-card">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-default">
+            <div className="flex items-center gap-2">
+              <Building2 size={14} className="text-primary" />
+              <h2 className="text-[13px] font-medium text-content">Báo cáo đào tạo bộ phận</h2>
+            </div>
+            <Link href="/my-department" className="flex items-center gap-1 text-[11px] text-primary hover:underline">
+              Xem chi tiết <ArrowRight size={11} />
+            </Link>
+          </div>
+          {deptStats.length === 0 ? (
+            <div className="px-4 py-8 text-center text-subtle text-[12px]">
+              <Building2 size={28} className="mx-auto mb-2 opacity-30" />
+              <p>Đang tải dữ liệu bộ phận...</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-default">
+                    <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Đơn vị</th>
+                    <th className="text-right text-[10px] text-faint font-medium px-4 py-2.5">NV</th>
+                    <th className="text-right text-[10px] text-faint font-medium px-4 py-2.5">Đăng ký KH</th>
+                    <th className="text-[10px] text-faint font-medium px-4 py-2.5 min-w-[140px]">Hoàn thành</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deptStats.map((row) => (
+                    <tr key={row.orgId} className="border-b border-default last:border-0 hover:bg-muted transition-colors">
+                      <td className="px-4 py-3 text-[12px] font-medium text-content">{row.orgName}</td>
+                      <td className="px-4 py-3 text-[11px] text-subtle text-right">{row.memberCount}</td>
+                      <td className="px-4 py-3 text-[11px] text-subtle text-right">{row.enrolled}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={11} className={row.completionRate >= 80 ? 'text-success' : row.completionRate >= 40 ? 'text-primary' : 'text-danger'} />
+                          <span className="text-[11px] text-content">
+                            {row.completed}/{row.enrolled}
+                            {row.enrolled > 0 ? ` (${row.completionRate}%)` : ''}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
