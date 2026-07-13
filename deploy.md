@@ -3,6 +3,26 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-13 09:00] Fix: nút gửi lại email chào mừng báo lỗi hệ thống
+
+**Loại:** fix + migration
+
+**Các thay đổi:**
+- `prisma db push` + `prisma generate`: Tạo cột `companyId String?` trên bảng `User` (đã có trong schema nhưng chưa push lên DB)
+- `src/app/api/users/[id]/resend-welcome/route.ts`: Sửa kiểm tra tenant — dùng `companyId OR roles` thay vì chỉ `companyId` (user cũ chưa có companyId sẽ bị ForbiddenError)
+- `src/app/api/users/resend-welcome-bulk/route.ts`: Sửa query WHERE dùng `OR [{ companyId }, { roles.some }]` để bao gồm cả user cũ không có companyId
+
+**Nguyên nhân:**
+- Cột `companyId` trên `User` chưa được `prisma db push` → Prisma throw lỗi khi select/filter field này
+- Ngay cả sau khi push, user cũ có `companyId = null` nên kiểm tra `target.companyId !== companyId` luôn true → ForbiddenError
+
+**Kết quả:**
+- Build thành công; pm2 restart lms-web + lms-worker → online
+- Cả gửi lẻ lẫn gửi hàng loạt đều hoạt động với mọi user (cũ và mới)
+
+**Lưu ý / Rủi ro:**
+- User mới tạo từ giờ sẽ có `companyId` được set từ org; user cũ vẫn null nhưng được xác định qua roles
+
 ## [2026-07-12 10:30] Fix: User không có role bị ẩn khỏi danh sách
 
 **Loại:** fix + migration

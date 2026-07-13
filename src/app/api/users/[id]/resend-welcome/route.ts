@@ -27,13 +27,24 @@ export const POST = withRole(
 
       const target = await prisma.user.findUnique({
         where: { id: targetId },
-        select: { id: true, email: true, fullName: true, companyId: true, isActive: true },
+        select: {
+          id: true, email: true, fullName: true, companyId: true, isActive: true,
+          roles: { select: { organization: { select: { id: true, companyId: true } } } },
+        },
       });
 
       if (!target) throw new NotFoundError('Người dùng');
-      if (!isGroupAdmin && target.companyId !== companyId) {
-        throw new ForbiddenError('Không có quyền thao tác với người dùng này');
+
+      if (!isGroupAdmin) {
+        // Kiểm tra tenant: user phải thuộc công ty (qua companyId hoặc qua vai trò)
+        const belongsToCompany =
+          target.companyId === companyId ||
+          target.roles.some(
+            (r) => r.organization.id === companyId || r.organization.companyId === companyId,
+          );
+        if (!belongsToCompany) throw new ForbiddenError('Không có quyền thao tác với người dùng này');
       }
+
       if (!target.isActive) throw new ForbiddenError('Tài khoản đã bị vô hiệu hóa');
 
       const tempPassword = generateTempPassword();

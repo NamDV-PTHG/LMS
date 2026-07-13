@@ -22,9 +22,25 @@ export const POST = withRole(
   ['group_admin', 'company_admin'],
   async (_req, { companyId }) => {
     try {
+      // Lấy tất cả user thuộc công ty: qua companyId trực tiếp HOẶC qua vai trò (user cũ chưa có companyId)
       const users = await prisma.user.findMany({
-        where: { companyId, isActive: true },
+        where: {
+          isActive: true,
+          OR: [
+            { companyId },
+            {
+              roles: {
+                some: {
+                  organization: {
+                    OR: [{ id: companyId }, { companyId }],
+                  },
+                },
+              },
+            },
+          ],
+        },
         select: { id: true, email: true, fullName: true },
+        distinct: ['id'],
       });
 
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://lms.phuthaiholdings.com:5980';
