@@ -3,6 +3,303 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-13 18:30] Fix: PWA shortcut không còn nhảy về giao diện web
+
+**Loại:** fix
+
+**Nguyên nhân gốc:**
+- `auth-provider.tsx` hardcode `router.push('/dashboard')` sau login và `router.push('/login')` sau logout — không phân biệt ngữ cảnh PWA vs web
+- 8 trang PWA (`/app/*`) redirect về `/login` (ngoài scope `/app`) khi chưa xác thực
+- Chưa có trang `/app/login` trong PWA scope
+
+**Các thay đổi:**
+- `src/components/providers/auth-provider.tsx`: `login()` và `logout()` dùng `window.location.pathname.startsWith('/app')` để phát hiện ngữ cảnh PWA — redirect đến `/app/home` / `/app/login` thay vì `/dashboard` / `/login`
+- `src/app/(pwa)/app/login/page.tsx` *(mới)*: Trang đăng nhập nằm trong PWA scope, auto-redirect đến `/app/home` nếu đã có session
+- 8 trang PWA: thay `router.replace('/login')` → `router.replace('/app/login')` (home, courses, notifications, progress, my-department, lesson, quiz, course-detail)
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Luồng PWA: shortcut → `/app/home` → chưa login → `/app/login` → đăng nhập → `/app/home` (không bao giờ ra ngoài scope `/app`)
+- Luồng web: không thay đổi, vẫn dùng `/login` → `/dashboard`
+
+**Lưu ý:**
+- Trên mobile cần xóa shortcut cũ và thêm lại để service worker cache mới áp dụng
+
+## [2026-07-13 18:00] Fix + Feature: Chuẩn hóa vòng đời năng lực — Level nhất quán từ khóa học đến radar
+
+**Loại:** fix + feature
+
+**Các thay đổi:**
+- `src/services/competency.service.ts`: Thêm `updateCompetencyOnCourseComplete(userId, courseId)` — cập nhật `UserCompetencyProfile.currentLevel = targetLevel` khi khóa học (không quiz) được hoàn thành, nguồn `SYSTEM`, không downgrade
+- `src/services/enrollment.service.ts`: `checkCourseCompletion()` bổ sung 2 lệnh gọi sau `issueCertificate`: `updateCompetencyOnCourseComplete()` và `onCourseCompleted()` — fix bug lộ trình học không unlock step tiếp theo
+- `src/services/quiz.service.ts`: `updateCompetencyFromCategories()` thêm param `courseId`; nếu khóa học đã có `CompetencyCourseLink` thì bỏ qua (nhường cho `updateCompetencyFromQuiz`) — tránh 2 thang đo ghi đè nhau
+- `src/app/(dashboard)/competency-frameworks/[id]/page.tsx`: Thêm hint "Vị trí yêu cầu cấp N" + warning cam khi `targetLevel < requiredLevel` + form chỉnh sửa `levelDescriptions` cấp 1–5 per competency
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Luồng đánh giá năng lực thống nhất: hoàn thành khóa học → `currentLevel = targetLevel` → radar cập nhật
+- Admin có thể định nghĩa mô tả từng cấp (Cấp 3 = "Tự thực hiện không cần hướng dẫn") trực tiếp trong UI
+
+**Lưu ý / Rủi ro:**
+- `updateCompetencyFromCategories` vẫn chạy cho khóa học KHÔNG có `CompetencyCourseLink` (backward compat)
+- Cần admin gắn khóa học vào năng lực trước thì radar mới có dữ liệu thực
+
+## [2026-07-13 17:15] Feature: UI liên kết khóa học ↔ năng lực trong khung năng lực
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/services/competency.service.ts`: `getFramework()` bổ sung include `courseLinks → course { id, title }` để trả về danh sách khóa học đã liên kết
+- `src/app/(dashboard)/competency-frameworks/[id]/page.tsx`: Thêm UI per-competency — nút "Khóa học" expand panel hiển thị danh sách khóa học liên kết (tên + cấp đạt được + nút gỡ) và form gắn khóa học mới (chọn khóa học + cấp đạt được)
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Admin có thể vào `/competency-frameworks/[id]` → click từng năng lực → gắn/gỡ khóa học và đặt `targetLevel` (cấp học viên đạt được khi hoàn thành khóa)
+
+**Lưu ý / Rủi ro:**
+- Cần gắn khóa học vào từng năng lực trước thì radar mới có dữ liệu cập nhật sau khi học viên hoàn thành khóa học
+
+## [2026-07-13 16:30] Fix: radar chart dùng khung năng lực làm axis khi vị trí có ≥3 frameworks
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/competency-radar.service.ts`: khi vị trí có ≥3 frameworks, dùng mỗi framework làm 1 axis thay vì dùng domains của framework chính — tránh lỗi "Cần ít nhất 3 domain" khi framework chính có <3 domains
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Vị trí Giám đốc công nghệ (4 frameworks) hiển thị radar 4 trục = 4 khung năng lực
+
+**Lưu ý / Rủi ro:**
+- Với vị trí có 1–2 frameworks: vẫn dùng domains của framework chính làm axes (hành vi cũ)
+
+## [2026-07-13 15:30] Feature: radar chart năng lực kiểu mới theo từng user/vị trí
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/api/reports/company/[companyId]/competency-by-position/route.ts` *(mới)*: API trả về tất cả vị trí có khung năng lực, axes (domain + requiredAvg), và danh sách users của vị trí đó với `levels[]` và `readinessPct` từng người
+- `src/components/charts/position-user-radar.tsx` *(mới)*: Component radar chart theo kiểu ảnh mẫu — nền polygon lưới 0-100, dashed polygon xanh = yêu cầu (outer boundary), solid polygon màu = hiện tại user, dot trên đỉnh, mini rings readiness, domain progress bars bên dưới
+- `src/app/(dashboard)/competency-reports/page.tsx`: Thêm tab "Năng lực theo vị trí" — chọn vị trí bằng pill buttons, grid hiển thị 1 card/user với radar chart riêng
+- `src/app/(dashboard)/users/[id]/page.tsx`: Thay `CompetencyRadarChart` → `PositionUserRadar` (adapter từ `CompetencyRadarData`)
+- `src/app/(dashboard)/profile/page.tsx`: Thay `CompetencyRadarChart` → `PositionUserRadar`
+
+**Kết quả:**
+- Tab "Năng lực theo vị trí": chọn vị trí → thấy grid radar chart riêng từng nhân viên được gán vị trí đó
+- Chart style giống ảnh: polygon, lưới đồng tâm, dashed = mục tiêu, solid fill = thực tế, màu theo readiness (xanh/vàng/đỏ)
+- Trang hồ sơ và trang chi tiết user cũng dùng chart kiểu mới
+- Build thành công, pm2 restart online
+
+## [2026-07-13 14:00] Fix: app mobile nhảy sang web khi xem báo cáo bộ phận
+
+**Loại:** fix + feature
+
+**Các thay đổi:**
+- `src/app/(pwa)/app/home/page.tsx`: sửa 2 link `href="/my-department"` → `href="/app/my-department"`
+- `src/app/(pwa)/app/my-department/page.tsx` *(mới)*: trang báo cáo bộ phận dành riêng cho mobile PWA — layout card thay bảng, drill-down bộ phận con, danh sách nhân viên với thanh tiến độ, chi tiết nhân viên dạng full-screen overlay thay drawer
+
+**Tính năng trang `/app/my-department`:**
+- Danh sách bộ phận quản lý → bấm để drill-down vào đơn vị con
+- Toggle "Đơn vị con / Nhân viên"
+- Card nhân viên: tiến độ bài học, số KH hoàn thành
+- Tap nhân viên → full-screen overlay: tổng hợp 3 stat + danh sách khóa học collapsible → sections → lessons với badge trạng thái, quiz score, thời gian
+- Back button điều hướng trong app (không nhảy về web)
+
+**Kết quả:**
+- Trên mobile: tất cả điều hướng báo cáo bộ phận đều ở trong `/app/*`
+- Trang web `/my-department` giữ nguyên cho desktop
+- Build thành công, pm2 restart online
+
+## [2026-07-13 13:00] Fix: biểu đồ radar khung năng lực hiển thị không đúng
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/competency-radar.service.ts`:
+  - Thêm interface `RadarAxis` với fields `currentRaw`, `requiredRaw` (giá trị thực 0–5) và `required` (chuẩn hoá), `current` (chuẩn hoá 0–1)
+  - `buildFrameworkRadar`: chuẩn hoá `radarAxes` — `required = 1.0` (luôn chạm biên ngoài), `current = currentAvg/requiredAvg` (0–1), giữ raw values cho tooltip
+- `src/components/charts/competency-radar.tsx`:
+  - `PolarRadiusAxis domain={[0, 1]}`, tickFormatter hiển thị `%`
+  - "Yêu cầu" → "Mục tiêu" (đổi tên cho rõ hơn), stroke dashed, fill nhạt
+  - "Hiện tại": fillOpacity cao hơn (0.35) để rõ vùng đạt được
+  - Tooltip: hiển thị giá trị thực `"Hiện tại: 2.0 / 3.0 (67%)"`, `"Mục tiêu: Yêu cầu 3.0 / 5"`
+
+**Vấn đề cũ:**
+- Chart dùng `domain={[0, 5]}` — mục tiêu framework (required=3) chỉ chiếm 60% chart, trông nhỏ và không trực quan
+- Không phân biệt rõ "mục tiêu = outer boundary" vs "thực tế"
+
+**Kết quả:**
+- Biên ngoài chart = mức yêu cầu của vị trí (luôn 100% = target)
+- Vùng xanh lá lấp dần vào trong khi học viên đạt từng mức
+- Hover tooltip hiển thị mức thực tế và tỉ lệ % so với yêu cầu
+- Build thành công, pm2 restart online
+
+## [2026-07-13 12:00] Fix: số học viên và đánh giá khóa học chia sẻ lẫn dữ liệu đa công ty
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/course.service.ts` — `getCourse`: thay `_count: { select: { enrollments: true } }` (đếm toàn bộ) bằng query riêng `prisma.enrollment.count({ where: { courseId, user: { companyId } } })` — chỉ đếm học viên thuộc công ty hiện tại
+- `src/app/api/courses/[id]/ratings/route.ts` — GET: thêm `user: { companyId }` vào `where` — chỉ trả về đánh giá của học viên thuộc công ty hiện tại; cập nhật handler signature để nhận `companyId`
+
+**Kết quả:**
+- Công ty nhận khóa học chia sẻ thấy đúng số học viên + đánh giá của riêng công ty mình
+- Công ty tạo khóa học cũng chỉ thấy dữ liệu của công ty mình (không lẫn dữ liệu công ty nhận)
+- Build thành công, pm2 restart online
+
+**Lưu ý / Rủi ro:**
+- group_admin xem khóa học sẽ thấy số học viên/đánh giá của group_admin's companyId — nếu cần xem tổng hợp toàn tập đoàn cần màn hình riêng (reports)
+
+## [2026-07-13 11:30] Fix: lịch sử giao học khóa học chia sẻ hiển thị dữ liệu sai đơn vị
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/api/courses/[id]/assign/route.ts` — GET handler: thêm filter `assignedBy: { companyId }` vào query `CourseAssignment`. Trước đây chỉ filter theo `courseId` nên công ty nhận khóa học chia sẻ thấy cả lịch sử giao học của công ty tạo khóa học
+
+**Kết quả:**
+- Mỗi công ty chỉ thấy lịch sử giao học do chính admin/hr của công ty đó tạo ra
+- Build thành công, pm2 restart online
+
+**Lưu ý / Rủi ro:**
+- Không ảnh hưởng POST handler (tạo giao học mới) — vẫn giao đúng companyId qua middleware
+
+## [2026-07-13 11:00] Fix: tiến độ TB bộ phận tính sai (hiển thị 100% thay vì 33%)
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/report.service.ts` — `getDeptChildrenStats`: thay cách tính `avgProgress` từ trung bình `LessonProgress.progressPct` (chỉ đếm bài đã vào) sang `completedLessons / totalLessons` từ cấu trúc khóa học (sections → lessons), giống `getDeptEmployees`
+
+**Nguyên nhân lỗi:**
+- `LessonProgress` row chỉ được tạo khi user vào bài học lần đầu. Nếu nhân viên có 3 bài, học xong 1 (progressPct=100), bài 2 và 3 chưa mở → không có row → average = 100/1 = 100% thay vì đúng là 1/3 = 33%
+
+**Kết quả:**
+- `avgProgress` giờ tính từ `(completedLessons / totalLessons) * 100` trên toàn bộ enrollment trong sub-tree
+- Ví dụ: 1 nhân viên, 3 bài, hoàn thành 1 → hiển thị 33% ✓
+- Build thành công, pm2 restart online
+
+**Lưu ý / Rủi ro:**
+- Query nặng hơn do include sections+lessons, nhưng chỉ chạy khi load trang báo cáo bộ phận
+
+## [2026-07-13 10:30] Fix: chia sẻ khóa học không hiển thị và không thể thu hồi
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/course.service.ts` — thay `createMany({ skipDuplicates: true })` bằng `upsert` per-company: khi chia sẻ lại sau khi đã thu hồi, row cũ được reactivate (`revokedAt: null`) thay vì bị bỏ qua ngầm do `@@unique([courseId, targetCompanyId])`
+- `src/app/(dashboard)/courses/[id]/page.tsx` — trong danh sách công ty chia sẻ, thay thế checkbox `disabled` cho các công ty "Đã chia sẻ" bằng row có nút **Thu hồi** inline, tìm `pub` theo `targetCompany.id` để truyền đúng `publicationId` vào `handleRevoke`
+
+**Kết quả:**
+- Sau khi chia sẻ, vào lại tab chia sẻ hiển thị đúng danh sách "Đang chia sẻ với X công ty" và các công ty tích checked trong danh sách bên dưới
+- Có thể thu hồi trực tiếp từ checkbox list bằng nút "Thu hồi" inline, không cần phụ thuộc vào section "Đang chia sẻ" riêng
+- Build thành công, `pm2 restart lms-web` → online
+
+**Lưu ý / Rủi ro:**
+- `upsert` cập nhật lại `publishedAt`, `publishedById`, `isMandatory`, `deadline` khi re-share — đây là hành vi mong muốn
+
+## [2026-07-13 17:00] Feature: Báo cáo bộ phận hiển thị tiến độ theo bài học
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/services/report.service.ts`: Cập nhật `getDeptEmployees` — thay vì chỉ trả `enrolled/completed/avgProgress`, giờ tính `totalLessons` và `completedLessons` thực tế bằng cách include lesson từ enrollment, trả thêm `lessonProgress` %
+- `src/services/report.service.ts`: Cập nhật `getUserReport` — bổ sung include sections/lessons với displayOrder, include `lessonProgresses` (có `lessonId`, `completedAt`), include `quizAttempts` (có `lessonId`); trả về lesson-by-lesson breakdown per section, kèm quiz result và timeSpentMin
+- `src/app/(dashboard)/my-department/page.tsx`: Viết lại toàn bộ — bảng nhân viên hiện "X/Y bài (Z%)" thay cho avgProgress; drawer detail có 2 cấp: khóa học → chương → bài học; mỗi bài có status badge, progress bar (nếu đang học), quiz score, ngày hoàn thành
+
+**Kết quả:**
+- Build thành công, không có TypeScript error
+- `pm2 restart lms-web` — status: online
+
+**Lưu ý / Rủi ro:**
+- `getDeptEmployees` nặng hơn do include toàn bộ lessons qua enrollment; với bộ phận lớn (>100 người) có thể chậm — cân nhắc phân trang hoặc cache nếu cần
+
+## [2026-07-13 16:00] Fix: quiz options lộn xộn + kết quả báo sai trên desktop
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/(dashboard)/my-courses/[id]/lessons/[lessonId]/page.tsx`:
+  - Sửa type `quizResult`: dùng đúng trường `isPassed`, `scorePct`, `maxScore`, `passingScore` thay vì `passed`, `score`, `totalQuestions` (không tồn tại trong API response)
+  - Sửa `handleSubmitQuiz`: `if (res.data.isPassed)` thay vì `res.data.passed` (undefined → lesson không bao giờ được mark completed khi qua)
+  - Sửa hiển thị kết quả: dùng `scorePct` (%) và `isPassed` đúng; format "X/Y điểm · Điểm đạt: Z%"
+  - Sort options: `[...q.options].sort((a,b) => a.key.localeCompare(b.key))` — luôn hiển thị A, B, C, D theo thứ tự
+- `src/app/(pwa)/app/courses/[courseId]/quiz/[quizId]/page.tsx`:
+  - Sort options cả khi làm bài lẫn khi xem lại đáp án
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Options luôn hiển thị theo thứ tự A, B, C, D
+- Kết quả quiz hiển thị đúng: % điểm, Chúc mừng/Chưa đạt, lesson được mark completed khi pass
+
+**Lưu ý / Rủi ro:**
+- Root cause: server trả `isPassed` nhưng code desktop đọc `passed` (undefined/falsy) → luôn báo "Chưa đạt" bất kể kết quả thực tế
+
+## [2026-07-13 15:00] Feature: hiển thị báo cáo bộ phận trên PWA mobile cho dept_head
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/(pwa)/app/home/page.tsx`: Thêm section "Báo cáo bộ phận" hiển thị cho user có role `dept_head`. Fetch data từ `/api/reports/dept` và `/api/reports/dept/[orgId]?view=children`, hiển thị danh sách đơn vị con với số nhân viên, số KH đăng ký, tỉ lệ hoàn thành. Link "Xem chi tiết" dẫn đến `/my-department`.
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Người dùng `dept_head` trên mobile PWA có thể thấy và truy cập báo cáo đào tạo bộ phận từ trang chủ
+
+**Lưu ý / Rủi ro:**
+- Không ảnh hưởng đến user không có `dept_head` role
+
+## [2026-07-13 14:00] Fix: lỗi "Dữ liệu không hợp lệ" khi nộp bài quiz
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/(dashboard)/my-courses/[id]/lessons/[lessonId]/page.tsx`: Sửa `handleSubmitQuiz` — bỏ chuyển đổi `answers` sang array (gây lỗi Zod), gửi `quizAnswers` trực tiếp dưới dạng `Record<string,string>`; đổi URL từ `lesson.quizId` sang `quizAttempt.attemptId` cho đúng với API
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Nộp bài quiz không còn báo lỗi "Dữ liệu không hợp lệ"
+
+**Lưu ý / Rủi ro:**
+- Không có breaking change
+
+## [2026-07-13 11:00] Fix: dashboard hiển thị báo cáo bộ phận cho trưởng bộ phận
+
+**Loại:** fix + feature
+
+**Các thay đổi:**
+- `src/app/(dashboard)/dashboard/page.tsx`: Thêm widget "Báo cáo đào tạo bộ phận" cho user có role `dept_head`
+  - Hiển thị ngay tại dashboard khi đăng nhập: danh sách đơn vị con + số nhân viên + số đăng ký + tỉ lệ hoàn thành
+  - Có nút "Xem chi tiết" dẫn đến trang `/my-department`
+  - Thêm link "Báo cáo bộ phận" vào mục "Truy cập nhanh" cho role `dept_head`
+  - Thêm `isDeptHead` flag (dept_head nhưng không phải company_admin/group_admin)
+
+**Kết quả:**
+- Build thành công, pm2 restart lms-web → online
+- User `nam.dv@phuthaiholdings.com` (trưởng phòng IT) thấy widget bộ phận ngay khi đăng nhập
+
+**Lưu ý / Rủi ro:**
+- Widget gọi nhiều API khi có nhiều managed orgs — chấp nhận vì thường dept_head chỉ quản lý 1-2 bộ phận
+- Cần cache Redis nếu cần tối ưu sau
+
+## [2026-07-10 10:00] Fix: khóa học giao cho phòng ban không cascade xuống phòng ban con
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/enrollment.service.ts`: Thêm CTE `user_ancestor_orgs` (recursive) vào SQL `fetchMyCourses`
+- Trước: `ca."targetDeptId" IN (SELECT "organizationId" FROM user_org)` — chỉ khớp org trực tiếp của user
+- Sau: `ca."targetDeptId" IN (SELECT id FROM user_ancestor_orgs WHERE id IS NOT NULL)` — khớp cả org cha, ông... 
+- Khi admin giao khóa học cho "Phòng IT", nhân viên ở "Nhóm hạ tầng" và "Nhóm phần mềm" (bộ phận con) giờ cũng thấy khóa học và có thể đăng ký → tiến độ hiển thị đúng trên "Bộ phận của tôi"
+- Đổi `WITH` thành `WITH RECURSIVE` để hỗ trợ CTE đệ quy
+
+**Kết quả:**
+- Build thành công, pm2 restart lms-web → online
+
+**Lưu ý / Rủi ro:**
+- Recursive CTE thêm một chút overhead query cho mỗi lần tải "Khóa học của tôi". Với cây org 2-3 cấp như hiện tại, hiệu năng vẫn tốt. Nếu org tree sâu hơn 5-6 cấp, cần đánh index thêm.
+- Cache `myCourses` vẫn là 60s — xóa cache Redis nếu cần thấy thay đổi ngay
+
 ## [2026-07-13 09:30] Fix: sơ đồ tổ chức hiển thị sai số nhân viên/vị trí
 
 **Loại:** fix

@@ -76,7 +76,7 @@ export default function LessonPlayerPage() {
 
   // ── Auth guard ────────────────────────────────────────────────
   useEffect(() => {
-    if (!authLoading && !accessToken) router.replace('/login')
+    if (!authLoading && !accessToken) router.replace('/app/login')
   }, [authLoading, accessToken, router])
 
   // ── Load lesson data ──────────────────────────────────────────

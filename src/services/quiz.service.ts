@@ -66,13 +66,24 @@ const DIFFICULTY_WEIGHT: Record<string, number> = {
  * Scoring: weighted-correct% = Σ(weight × isCorrect) / Σ(weight)
  * Level mapping: <20%→L1, 20–40%→L2, 40–60%→L3, 60–80%→L4, ≥80%→L5
  * Rule: never downgrade an existing level.
+ *
+ * NOTE: Nếu khóa học đã có CompetencyCourseLink, nhường cho updateCompetencyFromQuiz()
+ * để đảm bảo level nhất quán với targetLevel đã được admin cấu hình.
  */
 export async function updateCompetencyFromCategories(
   userId: string,
   questionIds: string[],
   gradedAnswers: Record<string, { isCorrect: boolean }>,
+  courseId?: string,
 ): Promise<void> {
   if (questionIds.length === 0) return;
+
+  // Nếu khóa học đã có CompetencyCourseLink → nhường cho Course-based update
+  // tránh 2 nguồn ghi đè nhau với thang đo khác nhau
+  if (courseId) {
+    const hasLink = await prisma.competencyCourseLink.count({ where: { courseId } });
+    if (hasLink > 0) return;
+  }
 
   // Fetch questions with categoryId and difficulty
   const questions = await prisma.question.findMany({
@@ -361,10 +372,12 @@ export async function submitQuiz(
 
   // Category-based competency update — always runs (pass or fail)
   // Measures per-category weighted score → updates UserCompetencyProfile level
+  // Skip nếu khóa học đã có CompetencyCourseLink (nhường cho Course-based update)
   await updateCompetencyFromCategories(
     userId,
     questionIds,
     gradedAnswers,
+    attempt.enrollment.courseId,
   ).catch(() => {});
 
   // Update lesson progress if passed

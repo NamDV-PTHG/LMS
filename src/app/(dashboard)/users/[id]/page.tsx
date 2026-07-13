@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
-import { CompetencyRadarChart } from '@/components/charts/competency-radar';
+import { PositionUserRadar } from '@/components/charts/position-user-radar';
 import type { CompetencyRadarData } from '@/services/competency-radar.service';
 
 // group_admin / group_hrm are group-level roles — not assignable at company level
@@ -666,7 +666,15 @@ export default function UserDetailPage() {
                 <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin" />
               </div>
             ) : radarData ? (
-              <CompetencyRadarChart data={radarData} showDetails />
+              <PositionUserRadar
+                userName={radarData.fullName}
+                readinessPct={radarData.readinessScore}
+                axes={radarData.radarAxes.map((a) => ({
+                  domainName: a.subject,
+                  requiredAvg: a.requiredRaw,
+                  currentAvg: a.currentRaw,
+                }))}
+              />
             ) : (
               <p className="text-[12px] text-faint text-center py-6">Không tải được dữ liệu năng lực</p>
             )}

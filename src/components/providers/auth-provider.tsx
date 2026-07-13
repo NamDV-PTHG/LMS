@@ -94,10 +94,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { accessToken: token, user: profile, mustChangePassword } = res.data.data;
       setAccessToken(token);
       setUser(profile);
+      // Detect PWA context by current pathname — giữ user trong /app/* nếu đang ở PWA
+      const isPwa = typeof window !== 'undefined' && window.location.pathname.startsWith('/app');
       if (mustChangePassword) {
-        router.push('/change-password');
+        router.push(isPwa ? '/app/change-password' : '/change-password');
       } else {
-        router.push('/dashboard');
+        router.push(isPwa ? '/app/home' : '/dashboard');
       }
     },
     [router],
@@ -111,7 +113,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(null);
     setAccessToken(null);
-    router.push('/login');
+    // Giữ user trong /app/* khi đăng xuất từ PWA
+    const isPwa = typeof window !== 'undefined' && window.location.pathname.startsWith('/app');
+    router.push(isPwa ? '/app/login' : '/login');
   }, [accessToken, router]);
 
   // Auto-refresh: schedule refresh 60s before the token's actual expiry

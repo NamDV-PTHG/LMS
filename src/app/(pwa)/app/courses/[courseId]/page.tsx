@@ -62,7 +62,7 @@ export default function CourseDetailPage() {
 
   useEffect(() => {
     if (!authLoading && !accessToken) {
-      router.replace('/login')
+      router.replace('/app/login')
       return
     }
     if (!accessToken) return

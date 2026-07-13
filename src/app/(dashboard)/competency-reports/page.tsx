@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/providers/auth-provider';
 import { useToast } from '@/components/ui/toast';
-import { BarChart2, Building2, Users, TrendingUp, RefreshCw } from 'lucide-react';
+import { BarChart2, Building2, Users, TrendingUp, RefreshCw, Target } from 'lucide-react';
 import { CompetencyMatrix } from '@/components/charts/competency-matrix';
+import { PositionUserRadar } from '@/components/charts/position-user-radar';
 
-type Tab = 'company' | 'dept' | 'group' | 'user';
+type Tab = 'company' | 'dept' | 'group' | 'position';
 
 interface CompanyOption { id: string; name: string }
 interface CompanyOverview {
@@ -22,6 +23,14 @@ interface CompanyOverview {
 }
 interface DeptRow { id: string; name: string; type: string; userCount: number; readiness: number }
 interface GroupRow { id: string; name: string; userCount: number; profiledUsers: number; readiness: number }
+
+interface PositionRadarEntry {
+  positionId: string;
+  positionTitle: string;
+  frameworkName: string | null;
+  axes: { domainId: string; domainName: string; requiredAvg: number }[];
+  users: { userId: string; fullName: string; employeeCode: string | null; levels: number[]; readinessPct: number }[];
+}
 
 export default function CompetencyReportsPage() {
   const { user, accessToken } = useAuth();
@@ -41,6 +50,8 @@ export default function CompetencyReportsPage() {
   const [companyOverview, setCompanyOverview] = useState<CompanyOverview | null>(null);
   const [deptRows, setDeptRows] = useState<DeptRow[]>([]);
   const [groupRows, setGroupRows] = useState<GroupRow[]>([]);
+  const [positionData, setPositionData] = useState<PositionRadarEntry[]>([]);
+  const [selectedPositionId, setSelectedPositionId] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
   // Load company list
@@ -80,6 +91,18 @@ export default function CompetencyReportsPage() {
         }).then((r) => r.json());
         if (res.success) setDeptRows(res.data);
         else toast('error', res.error ?? 'Lỗi tải dữ liệu');
+      } else if (tab === 'position' && selectedCompanyId) {
+        const res = await fetch(`/api/reports/company/${selectedCompanyId}/competency-by-position`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }).then((r) => r.json());
+        if (res.success) {
+          setPositionData(res.data ?? []);
+          if (res.data?.length > 0 && !selectedPositionId) {
+            setSelectedPositionId(res.data[0].positionId);
+          }
+        } else {
+          toast('error', res.error ?? 'Lỗi tải dữ liệu');
+        }
       }
     } catch {
       toast('error', 'Lỗi kết nối');
@@ -96,6 +119,7 @@ export default function CompetencyReportsPage() {
     { key: 'group', label: 'Toàn tập đoàn', icon: TrendingUp, show: isGroupAdmin },
     { key: 'company', label: 'Theo công ty', icon: Building2, show: canSeeCompany },
     { key: 'dept', label: 'Theo phòng ban', icon: Users, show: canSeeCompany },
+    { key: 'position', label: 'Năng lực theo vị trí', icon: Target, show: canSeeCompany },
   ];
 
   const readinessColor = (s: number) =>
@@ -142,8 +166,8 @@ export default function CompetencyReportsPage() {
         })}
       </div>
 
-      {/* Company selector (for company/dept tabs) */}
-      {(tab === 'company' || tab === 'dept') && isGroupAdmin && companies.length > 0 && (
+      {/* Company selector (for company/dept/position tabs) */}
+      {(tab === 'company' || tab === 'dept' || tab === 'position') && isGroupAdmin && companies.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="text-[12px] text-subtle">Công ty:</label>
           <select
@@ -258,6 +282,85 @@ export default function CompetencyReportsPage() {
                         </div>
                       </div>
                     ))
+                )}
+              </div>
+            )}
+
+            {/* Tab: Năng lực theo vị trí — radar chart per user */}
+            {tab === 'position' && (
+              <div className="space-y-4">
+                {positionData.length === 0 ? (
+                  <p className="text-[12px] text-faint text-center py-8">
+                    Chưa có vị trí nào được gắn khung năng lực
+                  </p>
+                ) : (
+                  <>
+                    {/* Position selector */}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <label className="text-[12px] text-subtle font-medium">Vị trí:</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {positionData.map((pos) => (
+                          <button
+                            key={pos.positionId}
+                            onClick={() => setSelectedPositionId(pos.positionId)}
+                            className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors border ${
+                              selectedPositionId === pos.positionId
+                                ? 'bg-primary text-white border-primary'
+                                : 'border-default text-subtle hover:border-primary hover:text-primary'
+                            }`}
+                          >
+                            {pos.positionTitle}
+                            <span className="ml-1 opacity-60">({pos.users.length})</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Users grid for selected position */}
+                    {(() => {
+                      const pos = positionData.find((p) => p.positionId === selectedPositionId);
+                      if (!pos) return null;
+
+                      return (
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <Target size={13} className="text-primary" />
+                            <span className="text-[12px] font-semibold text-content">{pos.positionTitle}</span>
+                            {pos.frameworkName && (
+                              <span className="text-[11px] text-subtle">· {pos.frameworkName}</span>
+                            )}
+                            <span className="text-[11px] text-subtle ml-auto">{pos.users.length} nhân viên</span>
+                          </div>
+
+                          {pos.users.length === 0 ? (
+                            <p className="text-[12px] text-faint text-center py-8">
+                              Chưa có nhân viên nào được gắn vị trí này
+                            </p>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                              {pos.users.map((u) => (
+                                <div
+                                  key={u.userId}
+                                  className="border border-default rounded-xl p-4 bg-gray-50/40 hover:bg-gray-50 transition-colors"
+                                >
+                                  <PositionUserRadar
+                                    userName={u.fullName}
+                                    employeeCode={u.employeeCode}
+                                    readinessPct={u.readinessPct}
+                                    axes={pos.axes.map((a, i) => ({
+                                      domainName: a.domainName,
+                                      requiredAvg: a.requiredAvg,
+                                      currentAvg: u.levels[i] ?? 0,
+                                    }))}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </>
                 )}
               </div>
             )}

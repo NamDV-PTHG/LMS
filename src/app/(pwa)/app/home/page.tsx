@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Flame, Trophy, BookOpen, TrendingUp } from 'lucide-react'
+import { Flame, Trophy, BookOpen, TrendingUp, Building2, ChevronRight, Users, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '@/components/providers/auth-provider'
 import { ContinueCard, CourseListItem, type CourseCardData } from '@/components/pwa/course-card'
 import {
@@ -15,6 +15,15 @@ interface CourseRow extends CourseCardData {
   source: 'group_publish' | 'learning_group' | 'company_assign'
 }
 
+interface DeptSummary {
+  orgId: string
+  orgName: string
+  memberCount: number
+  enrolled: number
+  completed: number
+  completionRate: number
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────────
 export default function HomePage() {
   const { user, accessToken, isLoading: authLoading } = useAuth()
@@ -22,11 +31,17 @@ export default function HomePage() {
 
   const [courses, setCourses] = useState<CourseRow[]>([])
   const [fetchLoading, setFetchLoading] = useState(true)
+  const [deptSummary, setDeptSummary] = useState<DeptSummary[]>([])
+
+  const getRole = (r: unknown): string =>
+    typeof r === 'string' ? r : (r as { role: string }).role
+  const userRoles = user?.roles?.map(getRole) ?? []
+  const isDeptHead = userRoles.includes('dept_head')
 
   // Redirect to login if not authenticated
   useEffect(() => {
     if (!authLoading && !user) {
-      router.replace('/login')
+      router.replace('/app/login')
     }
   }, [authLoading, user, router])
 
@@ -45,6 +60,34 @@ export default function HomePage() {
       }
     })()
   }, [accessToken])
+
+  // Fetch dept summary for dept_head
+  useEffect(() => {
+    if (!accessToken || !isDeptHead) return
+    ;(async () => {
+      try {
+        const headers = { Authorization: `Bearer ${accessToken}` }
+        const res = await fetch('/api/reports/dept', { headers })
+        const json = await res.json()
+        if (!json.success || !Array.isArray(json.data)) return
+        const managed: { id: string; name: string }[] = json.data
+        const rows: DeptSummary[] = []
+        for (const org of managed) {
+          const childRes = await fetch(`/api/reports/dept/${org.id}?view=children`, { headers }).then((r) => r.json())
+          if (childRes.success && Array.isArray(childRes.data) && childRes.data.length > 0) {
+            childRes.data.forEach((c: { orgId: string; orgName: string; memberCount: number; enrolled: number; completed: number; completionRate: number }) => {
+              rows.push({ orgId: c.orgId, orgName: c.orgName, memberCount: c.memberCount, enrolled: c.enrolled, completed: c.completed, completionRate: c.completionRate })
+            })
+          } else {
+            rows.push({ orgId: org.id, orgName: org.name, memberCount: 0, enrolled: 0, completed: 0, completionRate: 0 })
+          }
+        }
+        setDeptSummary(rows)
+      } catch {
+        // silently ignore
+      }
+    })()
+  }, [accessToken, isDeptHead]) // eslint-disable-line
 
   // ─── Computed stats ─────────────────────────────────────────
   const total = courses.length
@@ -170,6 +213,51 @@ export default function HomePage() {
                 <CourseListItem key={c.id} course={c} />
               ))}
             </div>
+          </section>
+        )}
+
+        {/* ── Báo cáo bộ phận (dept_head) ── */}
+        {isDeptHead && (
+          <section>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <Building2 size={14} className="text-primary" />
+                <SectionTitle className="mb-0">Báo cáo bộ phận</SectionTitle>
+              </div>
+              <a href="/app/my-department" className="text-primary text-[13px] flex items-center gap-0.5">
+                Xem chi tiết <ChevronRight size={13} />
+              </a>
+            </div>
+            {deptSummary.length === 0 ? (
+              <div className="bg-surface rounded-xl shadow-card p-4 flex items-center gap-3">
+                <Building2 size={28} className="text-faint opacity-40 flex-shrink-0" />
+                <p className="text-[12px] text-faint">Đang tải dữ liệu bộ phận...</p>
+              </div>
+            ) : (
+              <div className="bg-surface rounded-xl shadow-card overflow-hidden">
+                {deptSummary.map((row, i) => (
+                  <a
+                    key={row.orgId}
+                    href="/app/my-department"
+                    className={`flex items-center gap-3 px-4 py-3 active:bg-muted transition-colors ${i < deptSummary.length - 1 ? 'border-b border-default' : ''}`}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0">
+                      <Users size={15} className="text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-medium text-content truncate">{row.orgName}</p>
+                      <p className="text-[10px] text-subtle mt-0.5">{row.memberCount} nhân viên · {row.enrolled} KH đăng ký</p>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <CheckCircle2 size={12} className={row.completionRate >= 80 ? 'text-green-500' : row.completionRate >= 40 ? 'text-amber-500' : 'text-red-400'} />
+                      <span className={`text-[11px] font-semibold ${row.completionRate >= 80 ? 'text-green-600' : row.completionRate >= 40 ? 'text-amber-600' : 'text-red-500'}`}>
+                        {row.completionRate}%
+      </span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            )}
           </section>
         )}
 

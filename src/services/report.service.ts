@@ -279,11 +279,28 @@ export async function getUserReport(companyId: string, userId: string) {
   const enrollments = await prisma.enrollment.findMany({
     where: { userId },
     include: {
-      course: { select: { id: true, title: true, estimatedHours: true } },
-      certificate: { select: { code: true, issuedAt: true, pdfUrl: true } },
-      lessonProgresses: { select: { status: true, progressPct: true, timeSpentSec: true } },
+      course: {
+        include: {
+          sections: {
+            orderBy: { displayOrder: 'asc' },
+            include: {
+              lessons: {
+                orderBy: { displayOrder: 'asc' },
+                select: {
+                  id: true, title: true, contentType: true, isRequired: true,
+                  estimatedMinutes: true, displayOrder: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      certificate: { select: { code: true, issuedAt: true } },
+      lessonProgresses: {
+        select: { lessonId: true, status: true, progressPct: true, timeSpentSec: true, completedAt: true },
+      },
       quizAttempts: {
-        select: { score: true, maxScore: true, passedAt: true, submittedAt: true },
+        select: { lessonId: true, score: true, maxScore: true, passedAt: true, submittedAt: true },
         orderBy: { startedAt: 'desc' },
       },
     },
@@ -293,13 +310,22 @@ export async function getUserReport(companyId: string, userId: string) {
   return {
     user,
     courses: enrollments.map((e) => {
-      const avgProgress =
-        e.lessonProgresses.length > 0
-          ? Math.round(
-              e.lessonProgresses.reduce((s, lp) => s + lp.progressPct, 0) / e.lessonProgresses.length,
-            )
-          : 0;
+      const progressMap = new Map(e.lessonProgresses.map((lp) => [lp.lessonId, lp]));
+      // Group quiz attempts by lessonId
+      const quizMap = new Map<string, typeof e.quizAttempts>();
+      for (const qa of e.quizAttempts) {
+        const arr = quizMap.get(qa.lessonId) ?? [];
+        arr.push(qa);
+        quizMap.set(qa.lessonId, arr);
+      }
+
+      const allLessons = e.course.sections.flatMap((s) => s.lessons);
+      const totalLessons = allLessons.length;
+      const completedLessons = allLessons.filter(
+        (l) => progressMap.get(l.id)?.status === 'completed',
+      ).length;
       const totalTimeSec = e.lessonProgresses.reduce((s, lp) => s + lp.timeSpentSec, 0);
+      const progressPct = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
       const bestAttempt = e.quizAttempts.find((a) => a.passedAt);
 
       return {
@@ -307,13 +333,48 @@ export async function getUserReport(companyId: string, userId: string) {
         courseTitle: e.course.title,
         enrolledAt: e.enrolledAt,
         completedAt: e.completedAt,
-        progressPct: avgProgress,
+        totalLessons,
+        completedLessons,
+        progressPct,
         timeSpentHours: Math.round((totalTimeSec / 3600) * 10) / 10,
         certificate: e.certificate ?? null,
-        quizBestScore: bestAttempt && bestAttempt.maxScore
-          ? Math.round((bestAttempt.score! / bestAttempt.maxScore) * 100)
-          : null,
+        quizBestScore:
+          bestAttempt && bestAttempt.maxScore
+            ? Math.round((bestAttempt.score! / bestAttempt.maxScore) * 100)
+            : null,
         quizAttemptCount: e.quizAttempts.length,
+        sections: e.course.sections.map((sec) => ({
+          id: sec.id,
+          title: sec.title,
+          order: sec.displayOrder,
+          lessons: sec.lessons.map((les) => {
+            const prog = progressMap.get(les.id);
+            const attempts = quizMap.get(les.id) ?? [];
+            const bestQuiz = attempts.find((a) => a.passedAt) ?? attempts[0] ?? null;
+            return {
+              id: les.id,
+              title: les.title,
+              contentType: les.contentType,
+              isRequired: les.isRequired,
+              estimatedMinutes: les.estimatedMinutes,
+              status: (prog?.status ?? 'not_started') as 'completed' | 'in_progress' | 'not_started',
+              completedAt: prog?.completedAt ?? null,
+              progressPct: prog?.progressPct ?? 0,
+              timeSpentMin: prog ? Math.round(prog.timeSpentSec / 60) : 0,
+              quiz:
+                les.contentType === 'quiz'
+                  ? {
+                      attempts: attempts.length,
+                      bestScore:
+                        bestQuiz && bestQuiz.maxScore
+                          ? Math.round((bestQuiz.score! / bestQuiz.maxScore) * 100)
+                          : null,
+                      passed: !!bestQuiz?.passedAt,
+                    }
+                  : null,
+            };
+          }),
+        })),
       };
     }),
   };
@@ -389,18 +450,28 @@ export async function getDeptChildrenStats(orgId: string) {
         }),
       ]);
 
-      // Average progress across all active enrollments in sub-tree
-      const progresses = await prisma.lessonProgress.findMany({
+      // Average progress: completedLessons / totalLessons across all enrollments in sub-tree
+      // Must use course structure (not just LessonProgress rows) — unvisited lessons have no row
+      const enrollmentsInSubtree = await prisma.enrollment.findMany({
         where: {
-          enrollment: {
-            user: { roles: { some: { organizationId: { in: subTreeIds } } } },
-          },
+          user: { roles: { some: { organizationId: { in: subTreeIds } } } },
         },
-        select: { progressPct: true },
+        include: {
+          course: {
+            include: { sections: { include: { lessons: { select: { id: true } } } } },
+          },
+          lessonProgresses: { select: { status: true } },
+        },
       });
+      let totalLessonsInSubtree = 0;
+      let completedLessonsInSubtree = 0;
+      for (const e of enrollmentsInSubtree) {
+        totalLessonsInSubtree += e.course.sections.reduce((s, sec) => s + sec.lessons.length, 0);
+        completedLessonsInSubtree += e.lessonProgresses.filter((lp) => lp.status === 'completed').length;
+      }
       const avgProgress =
-        progresses.length > 0
-          ? Math.round(progresses.reduce((s, p) => s + p.progressPct, 0) / progresses.length)
+        totalLessonsInSubtree > 0
+          ? Math.round((completedLessonsInSubtree / totalLessonsInSubtree) * 100)
           : 0;
 
       const hasChildren = await prisma.organization.count({
@@ -450,19 +521,30 @@ export async function getDeptEmployees(orgId: string) {
 
   const enrollmentStats = await Promise.all(
     users.map(async (u) => {
-      const [total, completed] = await Promise.all([
-        prisma.enrollment.count({ where: { userId: u.id } }),
-        prisma.enrollment.count({ where: { userId: u.id, completedAt: { not: null } } }),
-      ]);
-      const progresses = await prisma.lessonProgress.findMany({
-        where: { enrollment: { userId: u.id } },
-        select: { progressPct: true },
+      const enrollments = await prisma.enrollment.findMany({
+        where: { userId: u.id },
+        include: {
+          course: {
+            include: {
+              sections: {
+                include: { lessons: { select: { id: true } } },
+              },
+            },
+          },
+          lessonProgresses: { select: { status: true } },
+        },
       });
-      const avgProgress =
-        progresses.length > 0
-          ? Math.round(progresses.reduce((s, p) => s + p.progressPct, 0) / progresses.length)
-          : 0;
-      return { userId: u.id, total, completed, avgProgress };
+
+      const totalCourses = enrollments.length;
+      const completedCourses = enrollments.filter((e) => e.completedAt !== null).length;
+      let totalLessons = 0;
+      let completedLessons = 0;
+      for (const e of enrollments) {
+        const cnt = e.course.sections.reduce((s, sec) => s + sec.lessons.length, 0);
+        totalLessons += cnt;
+        completedLessons += e.lessonProgresses.filter((lp) => lp.status === 'completed').length;
+      }
+      return { userId: u.id, totalCourses, completedCourses, totalLessons, completedLessons };
     }),
   );
 
@@ -476,10 +558,12 @@ export async function getDeptEmployees(orgId: string) {
       email: u.email,
       employeeCode: u.employeeCode,
       jobTitle: u.jobPosition?.title ?? u.jobTitle,
-      enrolled: stats.total,
-      completed: stats.completed,
-      completionRate: stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0,
-      avgProgress: stats.avgProgress,
+      enrolled: stats.totalCourses,
+      completed: stats.completedCourses,
+      completionRate: stats.totalCourses > 0 ? Math.round((stats.completedCourses / stats.totalCourses) * 100) : 0,
+      totalLessons: stats.totalLessons,
+      completedLessons: stats.completedLessons,
+      lessonProgress: stats.totalLessons > 0 ? Math.round((stats.completedLessons / stats.totalLessons) * 100) : 0,
     };
   });
 }

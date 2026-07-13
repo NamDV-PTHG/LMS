@@ -35,7 +35,7 @@ export default function ProgressPage() {
   const [expandCompleted, setExpandCompleted] = useState(false)
 
   useEffect(() => {
-    if (!authLoading && !accessToken) { router.replace('/login'); return }
+    if (!authLoading && !accessToken) { router.replace('/app/login'); return }
     if (!accessToken) return
     ;(async () => {
       try {

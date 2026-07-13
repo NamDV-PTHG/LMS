@@ -90,28 +90,48 @@ function RadarPanel({ readinessScore, metCount, totalCompetencies, radarAxes, do
           <RadarChart data={radarAxes}>
             <PolarGrid stroke="#e5e7eb" />
             <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10, fill: '#6b7280' }} />
-            <PolarRadiusAxis angle={30} domain={[0, 5]} tickCount={6} tick={{ fontSize: 9, fill: '#9ca3af' }} />
+            {/* domain 0–1: required always fills to outer edge, current fills proportionally */}
+            <PolarRadiusAxis
+              angle={30}
+              domain={[0, 1]}
+              tickCount={6}
+              tick={{ fontSize: 9, fill: '#9ca3af' }}
+              tickFormatter={(v: number) => `${Math.round(v * 100)}%`}
+            />
+            {/* Outer boundary = target/requirement for this position */}
             <Radar
-              name="Yêu cầu"
+              name="Mục tiêu"
               dataKey="required"
               stroke="#185FA5"
               fill="#185FA5"
-              fillOpacity={0.08}
+              fillOpacity={0.06}
               strokeDasharray="4 2"
+              strokeWidth={1.5}
             />
+            {/* Actual level — lights up within the target boundary */}
             <Radar
               name="Hiện tại"
               dataKey="current"
               stroke="#16a34a"
               fill="#16a34a"
-              fillOpacity={0.2}
+              fillOpacity={0.35}
+              strokeWidth={2}
             />
             <Legend
               wrapperStyle={{ fontSize: '11px' }}
               formatter={(value) => <span style={{ color: '#374151' }}>{value}</span>}
             />
             <Tooltip
-              formatter={(value: number, name: string) => [`${value.toFixed(1)}/5`, name]}
+              formatter={(value: number, name: string, props: { payload?: { currentRaw?: number; requiredRaw?: number } }) => {
+                const p = props.payload ?? {};
+                if (name === 'Mục tiêu') {
+                  return [`Yêu cầu: ${(p.requiredRaw ?? 0).toFixed(1)} / 5`, name];
+                }
+                if (name === 'Hiện tại') {
+                  return [`${(p.currentRaw ?? 0).toFixed(1)} / ${(p.requiredRaw ?? 0).toFixed(1)} (${Math.round(value * 100)}%)`, name];
+                }
+                return [`${Math.round(value * 100)}%`, name];
+              }}
               labelStyle={{ fontSize: '11px', fontWeight: 600 }}
               contentStyle={{ fontSize: '11px', borderRadius: '8px', border: '1px solid #e5e7eb' }}
             />

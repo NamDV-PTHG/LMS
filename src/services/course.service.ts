@@ -179,22 +179,31 @@ export async function getCourses(
 export async function getCourse(courseId: string, companyId: string, userId: string, roles: RoleType[]) {
   await assertCourseAccess(courseId, companyId, userId, roles);
 
-  const result = await prisma.course.findUnique({
-    where: { id: courseId },
-    include: {
-      ownerCompany: { select: { id: true, name: true } },
-      sections: {
-        orderBy: { displayOrder: 'asc' },
-        include: {
-          lessons: { orderBy: { displayOrder: 'asc' } },
+  const [result, enrolledCount] = await Promise.all([
+    prisma.course.findUnique({
+      where: { id: courseId },
+      include: {
+        ownerCompany: { select: { id: true, name: true } },
+        sections: {
+          orderBy: { displayOrder: 'asc' },
+          include: {
+            lessons: { orderBy: { displayOrder: 'asc' } },
+          },
         },
       },
-      _count: { select: { enrollments: true } },
-    },
-  });
+    }),
+    // Chỉ đếm học viên thuộc công ty hiện tại — không lẫn dữ liệu công ty khác
+    prisma.enrollment.count({
+      where: { courseId, user: { companyId } },
+    }),
+  ]);
 
   if (!result) return result;
-  return { ...result, thumbnailUrl: resolveThumbnailUrl(result.thumbnailUrl) };
+  return {
+    ...result,
+    thumbnailUrl: resolveThumbnailUrl(result.thumbnailUrl),
+    _count: { enrollments: enrolledCount },
+  };
 }
 
 export async function createCourse(input: CreateCourseInput, companyId: string, userId: string) {
@@ -324,17 +333,27 @@ export async function publishCourse(
   await prisma.course.update({ where: { id: courseId }, data: { isPublished: true } });
 
   // group_admin can additionally publish to other companies
+  // Use upsert per company so previously-revoked publications are reactivated instead of silently skipped
   if (isGroupAdmin && input.targetCompanyIds?.length) {
-    await prisma.coursePublication.createMany({
-      data: input.targetCompanyIds.map((targetCompanyId) => ({
-        courseId,
-        targetCompanyId,
-        publishedById: userId,
-        isMandatory: input.isMandatory,
-        deadline: input.deadline ? new Date(input.deadline) : null,
-      })),
-      skipDuplicates: true,
-    });
+    for (const targetCompanyId of input.targetCompanyIds) {
+      await prisma.coursePublication.upsert({
+        where: { courseId_targetCompanyId: { courseId, targetCompanyId } },
+        update: {
+          revokedAt: null,
+          publishedById: userId,
+          isMandatory: input.isMandatory,
+          deadline: input.deadline ? new Date(input.deadline) : null,
+          publishedAt: new Date(),
+        },
+        create: {
+          courseId,
+          targetCompanyId,
+          publishedById: userId,
+          isMandatory: input.isMandatory,
+          deadline: input.deadline ? new Date(input.deadline) : null,
+        },
+      });
+    }
   }
 
   await invalidateCourseCache(courseId);

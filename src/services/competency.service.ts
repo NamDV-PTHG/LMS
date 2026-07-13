@@ -18,7 +18,14 @@ export async function getFramework(id: string, companyId: string) {
       domains: {
         orderBy: { displayOrder: 'asc' },
         include: {
-          competencies: { orderBy: { displayOrder: 'asc' } },
+          competencies: {
+            orderBy: { displayOrder: 'asc' },
+            include: {
+              courseLinks: {
+                include: { course: { select: { id: true, title: true } } },
+              },
+            },
+          },
         },
       },
     },
@@ -208,6 +215,45 @@ export async function getUserCompetencyProfile(userId: string, companyId: string
     },
     orderBy: { assessedAt: 'desc' },
   });
+}
+
+/**
+ * Khi một khóa học được hoàn thành (không qua quiz), cập nhật UserCompetencyProfile
+ * theo CompetencyCourseLink.targetLevel. Không bao giờ giảm level đã có.
+ * Source = 'SYSTEM'.
+ */
+export async function updateCompetencyOnCourseComplete(
+  userId: string,
+  courseId: string,
+): Promise<void> {
+  const links = await prisma.competencyCourseLink.findMany({
+    where: { courseId },
+    select: { competencyId: true, targetLevel: true },
+  });
+  if (links.length === 0) return;
+
+  for (const link of links) {
+    const existing = await prisma.userCompetencyProfile.findUnique({
+      where: { userId_competencyId: { userId, competencyId: link.competencyId } },
+    });
+    if (!existing || existing.currentLevel < link.targetLevel) {
+      await prisma.userCompetencyProfile.upsert({
+        where: { userId_competencyId: { userId, competencyId: link.competencyId } },
+        create: {
+          userId,
+          competencyId: link.competencyId,
+          currentLevel: link.targetLevel,
+          source: 'SYSTEM',
+          assessedAt: new Date(),
+        },
+        update: {
+          currentLevel: link.targetLevel,
+          source: 'SYSTEM',
+          assessedAt: new Date(),
+        },
+      });
+    }
+  }
 }
 
 export async function upsertUserCompetency(

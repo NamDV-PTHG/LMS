@@ -10,7 +10,10 @@ export const GET = withRole(
   async (req, { params, companyId }) => {
     try {
       const assignments = await prisma.courseAssignment.findMany({
-        where: { courseId: params!.id },
+        where: {
+          courseId: params!.id,
+          assignedBy: { companyId },   // chỉ lấy lịch sử giao của công ty hiện tại
+        },
         include: {
           assignedBy: { select: { id: true, fullName: true } },
         },

@@ -3,6 +3,8 @@ import { cacheAside, invalidateMyCoursesCache, TTL, CACHE_KEYS } from '@/lib/cac
 import { NotFoundError, ConflictError, ForbiddenError, ValidationError } from '@/lib/errors';
 import { issueCertificate } from './certificate.service';
 import { resolveThumbnailUrl } from '@/lib/minio';
+import { onCourseCompleted } from './learning-path.service';
+import { updateCompetencyOnCourseComplete } from './competency.service';
 
 // ── UNION 3 nguồn — raw SQL ───────────────────────────────────
 // Spec Section 8 / CLAUDE.md nguyên tắc #4
@@ -34,11 +36,22 @@ export async function getMyCourses(userId: string, companyId: string): Promise<C
 
 async function fetchMyCourses(userId: string, companyId: string): Promise<CourseRow[]> {
   const rows = await prisma.$queryRaw<CourseRow[]>`
-    WITH user_org AS (
+    WITH RECURSIVE user_org AS (
       SELECT ur."organizationId", o."companyId"
       FROM "UserRole" ur
       JOIN "Organization" o ON o.id = ur."organizationId"
       WHERE ur."userId" = ${userId}
+    ),
+
+    -- Toàn bộ org IDs trong chuỗi tổ tiên (org trực tiếp + cha + ông...) của user.
+    -- Dùng để cascade company_assign từ phòng ban cha xuống phòng ban con.
+    user_ancestor_orgs AS (
+      SELECT "organizationId" AS id FROM user_org
+      UNION
+      SELECT o."parentId" AS id
+      FROM "Organization" o
+      INNER JOIN user_ancestor_orgs uao ON o.id = uao.id
+      WHERE o."parentId" IS NOT NULL
     ),
 
     -- ① group_publish: Tập đoàn publish xuống công ty
@@ -89,7 +102,7 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
       JOIN "Organization" org ON org.id = c."ownerCompanyId"
       WHERE (
         ca."targetUserId" = ${userId}
-        OR ca."targetDeptId" IN (SELECT "organizationId" FROM user_org)
+        OR ca."targetDeptId" IN (SELECT id FROM user_ancestor_orgs WHERE id IS NOT NULL)
         OR ca."targetCompanyId" = ${companyId}
       )
         AND c."isPublished" = true
@@ -385,6 +398,16 @@ async function checkCourseCompletion(enrollmentId: string, courseId: string, use
     // Auto-issue certificate
     await issueCertificate(enrollmentId).catch((err) =>
       console.error('[Enrollment] Certificate issue failed:', err),
+    );
+
+    // Cập nhật năng lực từ CompetencyCourseLink (cho khóa học không có quiz)
+    await updateCompetencyOnCourseComplete(userId, courseId).catch((err) =>
+      console.error('[Enrollment] Competency update failed:', err),
+    );
+
+    // Đánh dấu step lộ trình hoàn thành + mở khóa step tiếp theo
+    await onCourseCompleted(userId, courseId).catch((err) =>
+      console.error('[Enrollment] Learning path step update failed:', err),
     );
   }
 }

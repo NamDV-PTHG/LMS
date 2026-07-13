@@ -71,7 +71,7 @@ export default function QuizPage() {
 
   // ── Auth guard ────────────────────────────────────────────────
   useEffect(() => {
-    if (!authLoading && !accessToken) router.replace('/login')
+    if (!authLoading && !accessToken) router.replace('/app/login')
   }, [authLoading, accessToken, router])
 
   // ── Load enrollment info from course ─────────────────────────
@@ -361,9 +361,9 @@ export default function QuizPage() {
             </p>
           </div>
 
-          {/* Options */}
+          {/* Options — always sorted A B C D for consistency */}
           <div className="space-y-2.5">
-            {q.options.map((opt) => {
+            {[...q.options].sort((a, b) => a.key.localeCompare(b.key)).map((opt) => {
               const isSelected = answers[q.id] === opt.key
               const state: OptionState = isSelected ? 'selected' : 'default'
               return (
@@ -540,9 +540,9 @@ export default function QuizPage() {
                     <p className="text-[13px] font-medium text-content leading-snug">
                       {q.questionText}
                     </p>
-                    {/* Options with correct/wrong display */}
+                    {/* Options with correct/wrong display — sorted A B C D */}
                     <div className="space-y-2">
-                      {q.options.map((opt) => {
+                      {[...q.options].sort((a, b) => a.key.localeCompare(b.key)).map((opt) => {
                         const isSubmitted = graded?.submitted === opt.key
                         const isCorrect = graded?.correct === opt.key
                         let state: OptionState = 'default'

@@ -14,6 +14,16 @@ export interface RadarDomain {
   }[];
 }
 
+/** Radar axis entry — normalized so required=1 (outer boundary), current=0..1 */
+export interface RadarAxis {
+  subject: string;
+  required: number;     // always 1.0 (outer boundary = target)
+  current: number;      // 0–1, proportion of required achieved
+  currentRaw: number;   // actual current level (0–5) — for tooltip
+  requiredRaw: number;  // actual required level (0–5) — for tooltip
+  fullMark: number;     // always 1
+}
+
 /** Per-framework radar data — used in multi-tab display */
 export interface FrameworkRadarData {
   frameworkId: string;
@@ -24,7 +34,7 @@ export interface FrameworkRadarData {
   totalCompetencies: number;
   metCount: number;
   domains: RadarDomain[];
-  radarAxes: { subject: string; required: number; current: number; fullMark: number }[];
+  radarAxes: RadarAxis[];
 }
 
 export interface CompetencyRadarData {
@@ -36,7 +46,7 @@ export interface CompetencyRadarData {
   totalCompetencies: number;
   metCount: number;
   domains: RadarDomain[];        // composite domains (all frameworks merged) — backward compat
-  radarAxes: { subject: string; required: number; current: number; fullMark: number }[];
+  radarAxes: RadarAxis[];
   frameworkBreakdown: FrameworkRadarData[]; // NEW — one entry per linked framework
 }
 
@@ -98,11 +108,16 @@ function buildFrameworkRadar(
     ? Math.round((weightedScore / totalWeight) * 100)
     : 100;
 
-  const radarAxes = radarDomains.map((d) => ({
+  // Normalize: required = 1.0 (outer boundary = target), current = ratio 0–1
+  // This makes the "Yêu cầu" polygon always fill the outer edge, and
+  // "Hiện tại" lights up within it proportionally.
+  const radarAxes: RadarAxis[] = radarDomains.map((d) => ({
     subject: d.name,
-    required: d.requiredAvg,
-    current: d.currentAvg,
-    fullMark: 5,
+    required: 1,
+    current: d.requiredAvg > 0 ? Math.min(d.currentAvg / d.requiredAvg, 1) : 0,
+    currentRaw: d.currentAvg,
+    requiredRaw: d.requiredAvg,
+    fullMark: 1,
   }));
 
   return {
@@ -274,12 +289,43 @@ export async function getCompetencyRadar(
   const totalCompetencies = frameworkBreakdown.reduce((s, r) => s + r.totalCompetencies, 0);
   const metCount = frameworkBreakdown.reduce((s, r) => s + r.metCount, 0);
 
-  // Composite domains — merge all frameworks' domains for backward-compat flat display
+  // Composite domains — merge all frameworks' domains for flat display
   const allDomains = frameworkBreakdown.flatMap((r) => r.domains);
 
-  // For backward-compat radarAxes: use primary framework only (or first)
   const primaryFw = frameworkBreakdown.find((r) => r.isPrimary) ?? frameworkBreakdown[0];
   const primaryFrameworkName = primaryFw?.frameworkName ?? null;
+
+  // ── Radar axes strategy ──────────────────────────────────────────────────
+  // If the position has ≥3 frameworks: each framework becomes ONE axis
+  // (framework name = subject, aggregate readiness of all its competencies)
+  // Otherwise: use domains of the primary (or only) framework as axes.
+  let topLevelAxes: RadarAxis[];
+
+  if (frameworkBreakdown.length >= 3) {
+    // Framework-level axes — one axis per framework
+    topLevelAxes = frameworkBreakdown.map((fw) => {
+      const allComps = fw.domains.flatMap((d) => d.competencies);
+      const requiredRaw =
+        allComps.length > 0
+          ? allComps.reduce((s, c) => s + c.required, 0) / allComps.length
+          : 0;
+      const currentRaw =
+        allComps.length > 0
+          ? allComps.reduce((s, c) => s + Math.min(c.current, c.required), 0) / allComps.length
+          : 0;
+      return {
+        subject: fw.frameworkName,
+        required: 1,
+        current: requiredRaw > 0 ? Math.min(currentRaw / requiredRaw, 1) : 0,
+        currentRaw: Math.round(currentRaw * 10) / 10,
+        requiredRaw: Math.round(requiredRaw * 10) / 10,
+        fullMark: 1,
+      };
+    });
+  } else {
+    // Domain-level axes from primary framework
+    topLevelAxes = primaryFw?.radarAxes ?? [];
+  }
 
   return {
     userId,
@@ -290,7 +336,7 @@ export async function getCompetencyRadar(
     totalCompetencies,
     metCount,
     domains: allDomains,
-    radarAxes: primaryFw?.radarAxes ?? [],
+    radarAxes: topLevelAxes,
     frameworkBreakdown,
   };
 }

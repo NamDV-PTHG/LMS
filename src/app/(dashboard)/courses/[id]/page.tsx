@@ -1316,33 +1316,46 @@ export default function CourseEditorPage() {
                 </div>
 
                 <div className="border border-default rounded-lg divide-y divide-default max-h-72 overflow-y-auto">
-                  {shareCompanies.map((company) => (
-                    <label
-                      key={company.id}
-                      className={`flex items-center gap-3 px-4 py-3 select-none transition-colors ${
-                        company.alreadyShared
-                          ? 'bg-muted cursor-default'
-                          : 'hover:bg-primary-tint cursor-pointer'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={company.alreadyShared || selectedCompanyIds.has(company.id)}
-                        disabled={company.alreadyShared}
-                        onChange={() => !company.alreadyShared && toggleCompanySelect(company.id)}
-                        className="w-4 h-4 rounded accent-primary flex-shrink-0"
-                      />
-                      <span className={`text-[12px] flex-1 ${company.alreadyShared ? 'text-faint' : 'text-content'}`}>
-                        {company.name}
-                      </span>
-                      <span className="text-[11px] text-faint flex-shrink-0">{company.code}</span>
-                      {company.alreadyShared && (
-                        <span className="text-[10px] bg-success-tint text-success px-1.5 py-0.5 rounded font-medium flex-shrink-0">
-                          Đã chia sẻ
-                        </span>
-                      )}
-                    </label>
-                  ))}
+                  {shareCompanies.map((company) => {
+                    const pub = publications.find((p) => p.targetCompany.id === company.id);
+                    return company.alreadyShared ? (
+                      <div
+                        key={company.id}
+                        className="flex items-center gap-3 px-4 py-3 bg-muted"
+                      >
+                        <input
+                          type="checkbox"
+                          checked
+                          readOnly
+                          className="w-4 h-4 rounded accent-primary flex-shrink-0"
+                        />
+                        <span className="text-[12px] flex-1 text-content">{company.name}</span>
+                        <span className="text-[11px] text-faint flex-shrink-0">{company.code}</span>
+                        <button
+                          type="button"
+                          onClick={() => pub && handleRevoke(pub.id)}
+                          disabled={!pub || revoking === pub?.id}
+                          className="text-[10px] text-danger hover:text-danger px-2 py-1 rounded hover:bg-danger-tint transition-colors disabled:opacity-40 flex-shrink-0"
+                        >
+                          {revoking === pub?.id ? '...' : 'Thu hồi'}
+                        </button>
+                      </div>
+                    ) : (
+                      <label
+                        key={company.id}
+                        className="flex items-center gap-3 px-4 py-3 select-none hover:bg-primary-tint cursor-pointer transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedCompanyIds.has(company.id)}
+                          onChange={() => toggleCompanySelect(company.id)}
+                          className="w-4 h-4 rounded accent-primary flex-shrink-0"
+                        />
+                        <span className="text-[12px] flex-1 text-content">{company.name}</span>
+                        <span className="text-[11px] text-faint flex-shrink-0">{company.code}</span>
+                      </label>
+                    );
+                  })}
                 </div>
 
                 {selectedCompanyIds.size > 0 && (

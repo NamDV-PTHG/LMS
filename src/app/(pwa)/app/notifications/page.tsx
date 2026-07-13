@@ -97,7 +97,7 @@ export default function NotificationsPage() {
   }, [accessToken])
 
   useEffect(() => {
-    if (!authLoading && !accessToken) { router.replace('/login'); return }
+    if (!authLoading && !accessToken) { router.replace('/app/login'); return }
     if (!accessToken) return
     loadApiNotifs()
     loadDerivedNotifs()

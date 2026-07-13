@@ -6,10 +6,13 @@ import { prisma } from '@/lib/prisma';
 // GET /api/courses/[id]/ratings — returns individual ratings with comments
 export const GET = withRole(
   ['group_admin', 'group_hrm', 'company_admin', 'hr_manager', 'instructor'],
-  async (req, { params }) => {
+  async (req, { params, companyId }) => {
     try {
       const ratings = await prisma.courseRating.findMany({
-        where: { courseId: params.id },
+        where: {
+          courseId: params.id,
+          user: { companyId },   // chỉ đánh giá từ học viên của công ty hiện tại
+        },
         include: {
           user: { select: { id: true, fullName: true, employeeCode: true } },
         },
