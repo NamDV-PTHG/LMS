@@ -294,7 +294,45 @@ export async function getOrgFlatWithStats(companyId: string): Promise<OrgFlat[]>
 
   // Root node is the anchor of the tree — force parentId=null so it's always a root
   const rootFlat = root ? [{ ...toFlat(root), parentId: null }] : [];
-  return [...rootFlat, ...orgs.map(toFlat)];
+  const flat = [...rootFlat, ...orgs.map(toFlat)];
+
+  // ── Tính tổng subtree (hình cây) ─────────────────────────────
+  // userCount/positionCount từ _count chỉ tính thành viên TRỰC TIẾP.
+  // Org chart cần hiển thị tổng toàn bộ cây con.
+  // Thuật toán: post-order DFS từ lá lên gốc.
+
+  const nodeMap = new Map<string, OrgFlat>(flat.map((n) => [n.id, { ...n }]));
+  const childrenOf = new Map<string, string[]>();
+  nodeMap.forEach((_, id) => childrenOf.set(id, []));
+  nodeMap.forEach((node) => {
+    if (node.parentId && childrenOf.has(node.parentId)) {
+      childrenOf.get(node.parentId)!.push(node.id);
+    }
+  });
+
+  // Tính subtree sum bằng DFS đệ quy
+  function sumSubtree(id: string): { users: number; positions: number } {
+    const node = nodeMap.get(id)!;
+    let users = node.userCount ?? 0;
+    let positions = node.positionCount ?? 0;
+    for (const childId of childrenOf.get(id) ?? []) {
+      const childSum = sumSubtree(childId);
+      users += childSum.users;
+      positions += childSum.positions;
+    }
+    node.userCount = users;
+    node.positionCount = positions;
+    return { users, positions };
+  }
+
+  // Chạy từ root(s) — node không có parentId trong map
+  nodeMap.forEach((node) => {
+    if (!node.parentId || !nodeMap.has(node.parentId)) {
+      sumSubtree(node.id);
+    }
+  });
+
+  return Array.from(nodeMap.values());
 }
 
 /**

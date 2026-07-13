@@ -3,6 +3,22 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-13 09:30] Fix: sơ đồ tổ chức hiển thị sai số nhân viên/vị trí
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/organization.service.ts` `getOrgFlatWithStats()`: Thêm bước post-process sau khi lấy flat list — dùng DFS post-order để tổng hợp `userCount` và `positionCount` từ lá lên gốc (subtree sum)
+
+**Nguyên nhân:**
+- `_count.users` và `_count.deptPositions` từ Prisma chỉ đếm thành viên TRỰC TIẾP tại mỗi node
+- Org chart cần hiển thị tổng toàn bộ cây con (vd: phòng IT = trưởng phòng + nhóm hạ tầng + nhóm phần mềm)
+- Không có bước tổng hợp đệ quy nên số hiển thị luôn chỉ = số trực tiếp
+
+**Kết quả:**
+- Build thành công; pm2 restart lms-web → online
+- Mỗi node trên org chart giờ hiển thị tổng NV và VT của toàn bộ cây con bên dưới
+
 ## [2026-07-13 09:00] Fix: nút gửi lại email chào mừng báo lỗi hệ thống
 
 **Loại:** fix + migration
