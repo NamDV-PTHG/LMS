@@ -260,6 +260,15 @@ export async function startQuiz(
   const maxScore = selected.reduce((sum, q) => sum + q.scorePoints, 0);
   const timeLimitMins = cfg?.timeLimitMins ?? DEFAULT_TIME_LIMIT_MINS;
 
+  // Fetch correct answers now and snapshot them in the attempt.
+  // This protects in-progress attempts from post-publish edits to question answers.
+  const correctAnswerSnapshot = await prisma.question.findMany({
+    where: { id: { in: selected.map((q) => q.id) } },
+    select: { id: true, correctAnswer: true },
+  });
+  const correctAnswers: Record<string, string> = {};
+  for (const q of correctAnswerSnapshot) correctAnswers[q.id] = q.correctAnswer;
+
   // Create attempt record
   const attempt = await prisma.quizAttempt.create({
     data: {
@@ -268,7 +277,7 @@ export async function startQuiz(
       score: null,
       maxScore,
       startedAt: new Date(),
-      answers: { questionIds: selected.map((q) => q.id) },
+      answers: { questionIds: selected.map((q) => q.id), correctAnswers },
     },
   });
 
@@ -333,23 +342,31 @@ export async function submitQuiz(
 
   const passingScore = attempt.lesson.quizConfig?.passingScore ?? DEFAULT_PASSING_SCORE;
 
-  // Get stored question IDs
-  const storedAnswers = attempt.answers as { questionIds: string[] };
+  // Get stored question IDs and the correct-answer snapshot taken at attempt start.
+  // Using the snapshot means post-publish edits to questions do NOT retroactively
+  // re-grade answers from in-progress or already-submitted attempts.
+  const storedAnswers = attempt.answers as {
+    questionIds: string[];
+    correctAnswers?: Record<string, string>;
+  };
   const questionIds = storedAnswers.questionIds ?? [];
+  const snapshotCorrect = storedAnswers.correctAnswers ?? {};
 
-  // Fetch correct answers fresh from DB (never sent to client)
+  // Also fetch scorePoints (we still need these; correctAnswer is from snapshot)
   const questions = await prisma.question.findMany({
     where: { id: { in: questionIds } },
     select: { id: true, correctAnswer: true, scorePoints: true },
   });
 
-  // Grade
+  // Grade — prefer snapshotted correctAnswer; fall back to current DB value for
+  // legacy attempts created before the snapshot feature was added.
   let score = 0;
   const gradedAnswers: Record<string, { submitted: string; correct: string; isCorrect: boolean; points: number }> = {};
 
   questions.forEach((q) => {
     const submitted = (submittedAnswers[q.id] ?? '').trim().toUpperCase();
-    const correct = q.correctAnswer.trim().toUpperCase();
+    // Use snapshot if available, otherwise fall back to current DB value
+    const correct = (snapshotCorrect[q.id] ?? q.correctAnswer).trim().toUpperCase();
     const isCorrect = submitted === correct;
     if (isCorrect) score += q.scorePoints;
     gradedAnswers[q.id] = { submitted, correct, isCorrect, points: isCorrect ? q.scorePoints : 0 };

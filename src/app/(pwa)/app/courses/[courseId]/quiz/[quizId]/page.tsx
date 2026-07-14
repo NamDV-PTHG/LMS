@@ -361,9 +361,9 @@ export default function QuizPage() {
             </p>
           </div>
 
-          {/* Options — always sorted A B C D for consistency */}
+          {/* Options — rendered in server order so shuffleOptions config is respected */}
           <div className="space-y-2.5">
-            {[...q.options].sort((a, b) => a.key.localeCompare(b.key)).map((opt) => {
+            {q.options.map((opt) => {
               const isSelected = answers[q.id] === opt.key
               const state: OptionState = isSelected ? 'selected' : 'default'
               return (
@@ -429,9 +429,9 @@ export default function QuizPage() {
 
         {/* Exit confirm modal */}
         {showExitConfirm && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center p-4
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6
                           bg-black/40 backdrop-blur-sm animate-fade-in">
-            <div className="bg-surface rounded-xl w-full max-w-phone p-5 space-y-4 animate-slide-up">
+            <div className="bg-surface rounded-xl w-full max-w-sm p-5 space-y-4 animate-fade-in shadow-xl">
               <p className="text-[15px] font-medium text-content text-center">
                 Thoát bài kiểm tra?
               </p>

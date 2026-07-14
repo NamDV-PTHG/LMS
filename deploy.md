@@ -3,6 +3,31 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-14 10:30] fix: Quiz chấm điểm sai sau khi giảng viên sửa bài post-publish + shuffleOptions không hoạt động
+
+**Loại:** fix
+
+**Nguyên nhân gốc:**
+1. `submitQuiz()` re-fetch `correctAnswer` từ DB tại thời điểm nộp bài → nếu giảng viên đổi đáp án đúng sau khi học viên đã bắt đầu làm, hệ thống chấm theo đáp án mới, học viên bị sai oan.
+2. `shuffleOptions = true` server đã xáo trộn thứ tự options, nhưng client code sort lại theo key (`a.key.localeCompare(b.key)`) → xáo trộn không có tác dụng.
+
+**Các thay đổi:**
+- `src/services/quiz.service.ts`:
+  - `startQuiz()`: sau khi chọn câu hỏi, fetch `correctAnswer` và lưu snapshot vào `QuizAttempt.answers` dưới key `correctAnswers: { [questionId]: answer }`
+  - `submitQuiz()`: đọc `correctAnswers` từ snapshot trong attempt thay vì query DB. Fallback sang DB value cho các attempt cũ (tạo trước khi có tính năng snapshot) để backward-compatible
+- `src/app/(pwa)/app/courses/[courseId]/quiz/[quizId]/page.tsx`:
+  - Bỏ `.sort((a, b) => a.key.localeCompare(b.key))` khi render options trong quiz-taking view → options hiển thị đúng thứ tự server trả về (theo shuffleOptions config)
+  - Giữ nguyên sort ở review result view (hiển thị A/B/C/D theo thứ tự cố định để dễ đọc)
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → status online
+- Các attempt mới sẽ lưu snapshot đáp án đúng → không bị ảnh hưởng bởi chỉnh sửa sau khi xuất bản
+- shuffleOptions giờ có tác dụng trực quan khi làm bài
+
+**Lưu ý / Rủi ro:**
+- Các attempt đã submit từ trước: không ảnh hưởng (đã chấm rồi)
+- Các attempt đang in-progress từ trước khi deploy: sẽ fallback sang DB value (không có snapshot), hành vi giống như trước — chấp nhận được vì đây là edge case nhỏ
+
 ## [2026-07-14 09:30] fix: Hồ sơ Năng lực dùng CompetencyRadarChart thay PositionUserRadar
 
 **Loại:** fix
