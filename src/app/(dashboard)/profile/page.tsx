@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/components/providers/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { User, KeyRound, ChevronDown, ChevronUp, Award } from 'lucide-react';
-import { PositionUserRadar } from '@/components/charts/position-user-radar';
+import { CompetencyRadarChart } from '@/components/charts/competency-radar';
 import type { CompetencyRadarData } from '@/services/competency-radar.service';
 
 const inputClass =
@@ -209,15 +209,7 @@ export default function ProfilePage() {
             {radarLoading ? (
               <div className="flex items-center justify-center h-32 text-[12px] text-faint">Đang tải...</div>
             ) : radarData ? (
-              <PositionUserRadar
-                userName={radarData.fullName}
-                readinessPct={radarData.readinessScore}
-                axes={radarData.radarAxes.map((a) => ({
-                  domainName: a.subject,
-                  requiredAvg: a.requiredRaw,
-                  currentAvg: a.currentRaw,
-                }))}
-              />
+              <CompetencyRadarChart data={radarData} showDetails />
             ) : (
               <div className="flex items-center justify-center h-32 text-[12px] text-faint">Không có dữ liệu năng lực</div>
             )}

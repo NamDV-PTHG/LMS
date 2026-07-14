@@ -3,6 +3,27 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-14 09:30] fix: Hồ sơ Năng lực dùng CompetencyRadarChart thay PositionUserRadar
+
+**Loại:** fix
+
+**Nguyên nhân gốc:**
+- `profile/page.tsx` và `users/[id]/page.tsx` dùng `PositionUserRadar` — component này chỉ vẽ 1 radar chart đơn và yêu cầu >= 3 axes
+- Khi user có >= 3 khung năng lực, `radarAxes` là framework-level (4 trục), nhưng 3/4 trục có `current=0` → polygon "Hiện tại" thu về một điểm, trông như trống rỗng
+- Các framework tab riêng lẻ (mỗi framework chỉ có 1-2 domains) không đủ 3 axes để vẽ radar
+
+**Các thay đổi:**
+- `src/app/(dashboard)/profile/page.tsx`: đổi sang `CompetencyRadarChart` với `showDetails`
+- `src/app/(dashboard)/users/[id]/page.tsx`: đổi sang `CompetencyRadarChart` với `showDetails`
+- `src/components/charts/competency-radar.tsx`:
+  - `RadarPanel` chỉ vẽ radar khi `radarAxes.length >= 3`
+  - Nếu `1 <= axes < 3`: hiện bar chart fallback thay vì "Không có dữ liệu"
+
+**Kết quả:**
+- Hồ sơ Năng lực hiện tab "Tổng hợp" (4 framework-level axes → radar vẽ đúng) + 4 tab riêng từng khung
+- Tab Năng lực lãnh đạo: bar chart 2 trục (Kỹ năng đàm phán 100%, Kỹ năng xây dựng định hướng 0%)
+- Chi tiết competency (level bar 1-5 + nguồn) hiển thị đầy đủ khi `showDetails=true`
+
 ## [2026-07-13 18:50] Fix: Radar chart hiển thị sai user do destructure userId = undefined
 
 **Loại:** fix

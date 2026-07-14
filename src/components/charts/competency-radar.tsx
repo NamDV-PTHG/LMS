@@ -85,7 +85,7 @@ function RadarPanel({ readinessScore, metCount, totalCompetencies, radarAxes, do
         </div>
       </div>
 
-      {radarAxes.length > 0 ? (
+      {radarAxes.length >= 3 ? (
         <ResponsiveContainer width="100%" height={280}>
           <RadarChart data={radarAxes}>
             <PolarGrid stroke="#e5e7eb" />
@@ -137,6 +137,32 @@ function RadarPanel({ readinessScore, metCount, totalCompetencies, radarAxes, do
             />
           </RadarChart>
         </ResponsiveContainer>
+      ) : radarAxes.length > 0 ? (
+        /* Fewer than 3 axes → bar chart fallback */
+        <div className="space-y-2">
+          {radarAxes.map((axis) => {
+            const pct = Math.round(axis.current * 100);
+            return (
+              <div key={axis.subject} className="space-y-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-700 font-medium">{axis.subject}</span>
+                  <span className={pct >= 100 ? 'text-green-600 font-semibold' : pct >= 60 ? 'text-amber-600' : 'text-red-500'}>
+                    {pct}%
+                  </span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-2">
+                  <div
+                    className={`h-2 rounded-full transition-all ${pct >= 100 ? 'bg-green-500' : pct >= 60 ? 'bg-amber-400' : 'bg-blue-500'}`}
+                    style={{ width: `${Math.min(pct, 100)}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-gray-400">
+                  Hiện tại: {axis.currentRaw.toFixed(1)} / Yêu cầu: {axis.requiredRaw.toFixed(1)}
+                </p>
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <p className="text-center text-[12px] text-gray-400 py-8">Không có dữ liệu biểu đồ</p>
       )}
