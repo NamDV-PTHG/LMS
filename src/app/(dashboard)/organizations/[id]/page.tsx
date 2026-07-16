@@ -58,6 +58,8 @@ export default function OrgDetailPage() {
   const [editForm, setEditForm] = useState({ name: '', address: '', phone: '', description: '', parentId: '' });
   const [saving, setSaving] = useState(false);
   const [parentOptions, setParentOptions] = useState<{ id: string; name: string; code: string; type: string }[]>([]);
+  const [parentSearch, setParentSearch] = useState('');
+  const [parentDropdownOpen, setParentDropdownOpen] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -469,18 +471,79 @@ export default function OrgDetailPage() {
               {(org.type === 'dept' || org.type === 'team') && parentOptions.length > 0 && (
                 <div className="space-y-1.5">
                   <label className="block text-[12px] font-medium text-content">Bộ phận quản lý trực tiếp</label>
-                  <select
-                    value={editForm.parentId}
-                    onChange={(e) => setEditForm({ ...editForm, parentId: e.target.value })}
-                    className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-content focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 bg-surface"
-                  >
-                    <option value="">— Không có (trực thuộc công ty) —</option>
-                    {parentOptions.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.name} ({o.code})
-                      </option>
-                    ))}
-                  </select>
+                  {/* Searchable parent picker */}
+                  <div className="relative">
+                    {/* Input hiển thị tên đang chọn + ô tìm kiếm khi mở */}
+                    <button
+                      type="button"
+                      onClick={() => { setParentDropdownOpen((v) => !v); setParentSearch(''); }}
+                      className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-left focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 bg-surface flex items-center justify-between gap-2"
+                    >
+                      <span className={editForm.parentId ? 'text-content' : 'text-faint'}>
+                        {editForm.parentId
+                          ? (() => { const o = parentOptions.find((x) => x.id === editForm.parentId); return o ? `${o.name} (${o.code})` : '—'; })()
+                          : '— Không có (trực thuộc công ty) —'}
+                      </span>
+                      <svg className={`w-3.5 h-3.5 text-faint shrink-0 transition-transform ${parentDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                    </button>
+
+                    {parentDropdownOpen && (
+                      <div className="absolute z-20 mt-1 w-full bg-surface border border-default rounded-lg shadow-card overflow-hidden">
+                        {/* Search box */}
+                        <div className="p-2 border-b border-default">
+                          <input
+                            autoFocus
+                            type="text"
+                            value={parentSearch}
+                            onChange={(e) => setParentSearch(e.target.value)}
+                            placeholder="Tìm kiếm phòng ban..."
+                            className="w-full border border-default rounded-md px-2.5 py-1.5 text-[12px] text-content placeholder:text-faint focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                          />
+                        </div>
+
+                        {/* Options list */}
+                        <ul className="max-h-52 overflow-y-auto py-1">
+                          {/* Tuỳ chọn "không có" */}
+                          <li>
+                            <button
+                              type="button"
+                              onClick={() => { setEditForm({ ...editForm, parentId: '' }); setParentDropdownOpen(false); }}
+                              className={`w-full text-left px-3 py-2 text-[12px] hover:bg-muted transition-colors ${!editForm.parentId ? 'bg-primary-tint text-primary font-medium' : 'text-faint'}`}
+                            >
+                              — Không có (trực thuộc công ty) —
+                            </button>
+                          </li>
+
+                          {(() => {
+                            const q = parentSearch.trim().toLowerCase();
+                            const filtered = q
+                              ? parentOptions.filter((o) => o.name.toLowerCase().includes(q) || o.code.toLowerCase().includes(q))
+                              : parentOptions;
+                            if (filtered.length === 0) return (
+                              <li className="px-3 py-2 text-[12px] text-faint text-center">Không tìm thấy phòng ban</li>
+                            );
+                            return filtered.map((o) => (
+                              <li key={o.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => { setEditForm({ ...editForm, parentId: o.id }); setParentDropdownOpen(false); setParentSearch(''); }}
+                                  className={`w-full text-left px-3 py-2 text-[12px] hover:bg-muted transition-colors ${editForm.parentId === o.id ? 'bg-primary-tint text-primary font-medium' : 'text-content'}`}
+                                >
+                                  <span className="font-medium">{o.name}</span>
+                                  <span className="ml-1.5 text-faint text-[11px]">({o.code})</span>
+                                </button>
+                              </li>
+                            ));
+                          })()}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Click-outside overlay */}
+                    {parentDropdownOpen && (
+                      <div className="fixed inset-0 z-10" onClick={() => { setParentDropdownOpen(false); setParentSearch(''); }} />
+                    )}
+                  </div>
                 </div>
               )}
               <div className="space-y-1.5">

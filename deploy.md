@@ -3,6 +3,16 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-16 10:00] Tìm kiếm phòng ban trong mục "Bộ phận quản lý trực tiếp"
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/(dashboard)/organizations/[id]/page.tsx`: Thay `<select>` đơn giản bằng dropdown có ô tìm kiếm — lọc realtime theo tên hoặc mã phòng ban, highlight item đang chọn, click-outside đóng dropdown
+
+**Kết quả:**
+- Build thành công, pm2 restart online (port 3004)
+
 ## [2026-07-16 14:30] Fix bug quiz-import lưu correctAnswer dạng UUID thay vì label
 
 **Loại:** fix
