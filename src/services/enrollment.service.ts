@@ -18,7 +18,7 @@ interface CourseRow {
   completionMode: string;
   ownerCompanyId: string;
   ownerCompanyName: string;
-  source: 'group_publish' | 'learning_group' | 'company_assign' | 'learning_path';
+  source: 'group_publish' | 'learning_group' | 'company_assign' | 'learning_path' | 'enrolled_archived';
   deadline: Date | null;
   isMandatory: boolean;
   enrollmentId: string | null;
@@ -129,15 +129,32 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
         AND c."isActive" = true
     ),
 
-    -- Union và deduplicate (ưu tiên: group_publish > learning_group > company_assign > learning_path)
+    -- ⑤ enrolled_archived: Học viên đã đăng ký vẫn truy cập được dù khóa học bị dừng (archived)
+    -- Không lọc isActive để bảo toàn quyền truy cập cho học viên đang học
+    source5 AS (
+      SELECT
+        c.id, c.title, c.description, c."thumbnailUrl", c."estimatedHours",
+        c."completionMode", c."ownerCompanyId", org.name AS "ownerCompanyName",
+        'enrolled_archived'::text AS source,
+        e.deadline, e."isMandatory"
+      FROM "Enrollment" e
+      JOIN "Course" c ON c.id = e."courseId"
+      JOIN "Organization" org ON org.id = c."ownerCompanyId"
+      WHERE e."userId" = ${userId}
+        AND c."isPublished" = true
+        AND c."isActive" = false
+    ),
+
+    -- Union và deduplicate (ưu tiên: group_publish > learning_group > company_assign > learning_path > enrolled_archived)
     all_courses AS (
       SELECT *, ROW_NUMBER() OVER (
         PARTITION BY id
         ORDER BY CASE source
-          WHEN 'group_publish'   THEN 1
-          WHEN 'learning_group'  THEN 2
-          WHEN 'company_assign'  THEN 3
-          WHEN 'learning_path'   THEN 4
+          WHEN 'group_publish'    THEN 1
+          WHEN 'learning_group'   THEN 2
+          WHEN 'company_assign'   THEN 3
+          WHEN 'learning_path'    THEN 4
+          WHEN 'enrolled_archived' THEN 5
         END
       ) AS rn
       FROM (
@@ -148,6 +165,8 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
         SELECT * FROM source3
         UNION ALL
         SELECT * FROM source4
+        UNION ALL
+        SELECT * FROM source5
       ) combined
     )
 

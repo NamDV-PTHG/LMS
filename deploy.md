@@ -3,6 +3,96 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-16 14:30] Fix bug quiz-import lưu correctAnswer dạng UUID thay vì label
+
+**Loại:** fix
+
+**Nguyên nhân gốc rễ:**
+Route `POST /api/lessons/[lessonId]/quiz-import` (import câu hỏi từ CSV) có bug:
+- Options được tạo với format `{id: UUID, label: "A", content: "..."}` (sai)
+- `correctAnswer` được lưu là UUID của option thay vì label "A"/"B"/"C"/"D"
+- Khi học viên nộp bài, `submitQuiz` so sánh `submitted = "B"` với `correct = "some-uuid"` → KHÔNG BAO GIỜ KHỚP → luôn báo sai
+
+**Các thay đổi:**
+- `src/app/api/lessons/[lessonId]/quiz-import/route.ts`:
+  - Đổi format options từ `{id, label, content}` → `{key, text}` (chuẩn của question-bank API)
+  - Đổi `correctAnswer = correctOpt.id` → `correctAnswer = correctOpt.key` (lưu letter A/B/C/D)
+  - Tương tự fix cho `true_false` type
+  - Xóa import `randomUUID` không còn dùng
+- `scripts/fix-quiz-uuid-correctanswer.mjs`: Script fix data cho các câu hỏi đã bị lưu sai
+
+**Kết quả trên máy 10.191.36.71:**
+- Build thành công, `pm2 restart lms-web` → status online
+- Máy .71 không có câu hỏi bị ảnh hưởng (đã kiểm tra 124 câu, 0 UUID correctAnswer)
+
+**Cần thực hiện thêm trên máy 10.191.36.72 (production):**
+1. Pull code mới: `git pull`
+2. Chạy fix data: `node scripts/fix-quiz-uuid-correctanswer.mjs`
+3. Build + restart: `npm run build && pm2 restart lms-web`
+
+**Lưu ý / Rủi ro:**
+- Câu hỏi có UUID correctAnswer sau khi fix sẽ cho kết quả đúng với các attempt MỚI
+- Các attempt cũ đã submit với điểm 0 (do bug) KHÔNG tự động được re-grade
+- Nếu cần re-grade: cần query lại tất cả attempt có `gradedAnswers.isCorrect = false` và recompute
+
+## [2026-07-14 13:30] Quản lý trạng thái khóa học: Dừng/Khôi phục/Bản nháp/Xóa vĩnh viễn
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/services/enrollment.service.ts`: Thêm CTE thứ 5 (`enrolled_archived`) vào raw SQL `getMyCourses()` — học viên đã đăng ký vẫn thấy và truy cập khóa học bị dừng (`isActive=false`)
+- `src/services/course.service.ts`:
+  - `assertCourseAccess()`: Thêm tham số `allowArchived` để cho phép admin truy cập khóa học đã dừng
+  - `getCourses()`: Thay `isActive: true` bằng `OR [isActive=true, (isActive=false AND isPublished=true)]` — admin thấy cả khóa đã dừng trong danh sách
+  - `getCourse()`: Truyền `allowArchived=true` để trang chi tiết admin hiển thị được khóa học đã dừng
+  - Thêm `getArchiveImpact()`, `getDeleteImpact()`, `archiveCourse()`, `unarchiveCourse()`, `unpublishCourse()`
+  - Nâng cấp `deleteCourse()` thành hard delete thật: xóa các relation không có cascade, cleanup MinIO fire-and-forget
+- `src/app/api/courses/[id]/archive/route.ts` (mới): GET (impact), POST (dừng), DELETE (khôi phục)
+- `src/app/api/courses/[id]/unpublish/route.ts` (mới): POST — về bản nháp, block 409 nếu có học viên
+- `src/app/api/courses/[id]/delete-impact/route.ts` (mới): GET — thông tin tác động trước khi xóa
+- `src/app/(dashboard)/courses/page.tsx`: Thêm badge "Đã dừng" (màu cam) cho khóa học `isActive=false`
+- `src/app/(dashboard)/courses/[id]/page.tsx`:
+  - Badge "Đã dừng" thay thế badge "Đã xuất bản" khi `isPublished=true && isActive=false`
+  - Nút hành động theo trạng thái: Xuất bản / Dừng + Về bản nháp / Khôi phục + Xóa vĩnh viễn
+  - Modal xác nhận "Dừng khóa học" với impact info (số học viên, nhóm, lộ trình, checkbox thu hồi chia sẻ)
+  - Modal "Về bản nháp" đơn giản
+  - Modal "Xóa vĩnh viễn" 2 bước, hiển thị tác động (file storage, nhóm, lộ trình)
+
+**Kết quả:**
+- Build thành công, `npm run build` không có lỗi
+- `pm2 restart lms-web` thành công (port 3004, online)
+- 14 test cases pass: archive, restore, enrolled_archived CTE, admin list, unpublish block, hard delete block
+
+**Lưu ý / Rủi ro:**
+- Hard delete thật (không còn soft-delete): không thể rollback sau khi xóa
+- Xóa chỉ allowed khi `enrollment.count === 0`
+- MinIO cleanup fire-and-forget: nếu cleanup thất bại (log lỗi), file tồn tại trong storage nhưng không có bản ghi DB
+- Không ảnh hưởng đến Enrollment model (không có field `status`, CTE chỉ lọc `isPublished=true AND isActive=false`)
+- Khóa học đã dừng vẫn xuất hiện trong "Khóa học của tôi" của học viên đã đăng ký (thiết kế có chủ ý — đổi title sang "Đã dừng" nếu cần bổ sung sau)
+
+## [2026-07-14 17:00] Fix email sender name và tab title theo từng công ty
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/lib/email.ts`: Thêm `getCompanyEmailBranding(companyId?)` — ưu tiên `CompanySmtpConfig`, fallback về global `SmtpConfig`; brand name lấy từ `Organization.metadata.siteTitle`
+- `src/services/email.service.ts`: Thêm `companyId?` param cho cả 3 hàm (`sendWelcomeEmail`, `sendExternalLearnerInviteEmail`, `sendPasswordResetEmail`); thay "LMS Tập đoàn" hardcode bằng `brandName` động trong subject và HTML
+- `src/app/api/users/route.ts`: Truyền `companyId` vào `sendWelcomeEmail`
+- `src/app/api/users/[id]/resend-welcome/route.ts`: Truyền `target.companyId` vào `sendWelcomeEmail`
+- `src/app/api/users/resend-welcome-bulk/route.ts`: Truyền `companyId` vào `sendWelcomeEmail`
+- `src/app/api/organizations/[id]/admin/route.ts`: Truyền `orgId` vào `sendWelcomeEmail`
+- `src/app/api/auth/forgot-password/route.ts`: Truyền `user.companyId` vào `sendPasswordResetEmail`
+- `src/services/learning-group.service.ts`: Truyền `group.companyId` vào `sendExternalLearnerInviteEmail`
+- `src/app/(dashboard)/layout.tsx`: `BrandingInjector` cập nhật `document.title` theo `siteTitle` từ `/api/me/company` sau mỗi lần auth
+
+**Kết quả:**
+- Email gửi đi sẽ hiển thị tên công ty cụ thể (không còn "LMS Tập đoàn" cứng)
+- Tab title trình duyệt giữ đúng tên công ty khi chuyển trang
+- Build thành công, `pm2 restart lms-web` — status online
+
+**Lưu ý / Rủi ro:**
+- Nếu công ty chưa cấu hình `CompanySmtpConfig` hoặc `siteTitle`, fallback về global config — không có breaking change
+
 ## [2026-07-14 10:30] fix: Quiz chấm điểm sai sau khi giảng viên sửa bài post-publish + shuffleOptions không hoạt động
 
 **Loại:** fix

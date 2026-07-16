@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { cacheAside, invalidateCourseCache, TTL, CACHE_KEYS } from '@/lib/cache';
 import { NotFoundError, ForbiddenError, ConflictError, ValidationError } from '@/lib/errors';
 import { RoleType } from '@/types';
-import { resolveThumbnailUrl } from '@/lib/minio';
+import { resolveThumbnailUrl, minioClient, BUCKET_PRIVATE } from '@/lib/minio';
 
 // ── Schemas ───────────────────────────────────────────────────
 
@@ -59,9 +59,11 @@ async function assertCourseAccess(
   userId: string,
   roles: RoleType[],
   requireEdit = false,
+  allowArchived = false,
 ) {
   const course = await prisma.course.findUnique({ where: { id: courseId } });
-  if (!course || !course.isActive) throw new NotFoundError('Khóa học');
+  // Block if: course doesn't exist, OR is inactive AND we're not explicitly allowing archived access
+  if (!course || (!course.isActive && !allowArchived)) throw new NotFoundError('Khóa học');
 
   const isGroupAdmin = roles.includes('group_admin');
   if (isGroupAdmin) return course;
@@ -113,9 +115,18 @@ export async function getCourses(
   // Với company_admin/instructor: xem khóa học của công ty + khóa học được chia sẻ
   let where: Record<string, unknown>;
 
+  // Show active courses + archived courses (isActive=false & isPublished=true)
+  // Exclude legacy soft-deleted draft courses (isActive=false & isPublished=false)
+  const activeOrArchived = {
+    OR: [
+      { isActive: true },
+      { isActive: false, isPublished: true },
+    ],
+  };
+
   if (isGroupAdmin) {
     where = {
-      isActive: true,
+      ...activeOrArchived,
       ...(published !== undefined ? { isPublished: published } : {}),
     };
   } else if (includeShared) {
@@ -127,7 +138,7 @@ export async function getCourses(
     const sharedCourseIds = sharedPubs.map((p) => p.courseId);
 
     where = {
-      isActive: true,
+      ...activeOrArchived,
       ...creatorFilter,
       ...(published !== undefined ? { isPublished: published } : {}),
       OR: [
@@ -137,7 +148,7 @@ export async function getCourses(
     };
   } else {
     where = {
-      isActive: true,
+      ...activeOrArchived,
       ownerCompanyId: companyId,
       ...creatorFilter,
       ...(published !== undefined ? { isPublished: published } : {}),
@@ -149,7 +160,7 @@ export async function getCourses(
       where,
       select: {
         id: true, title: true, description: true, thumbnailUrl: true,
-        estimatedHours: true, completionMode: true, isPublished: true,
+        estimatedHours: true, completionMode: true, isPublished: true, isActive: true,
         createdAt: true, updatedAt: true,
         ownerCompany: { select: { id: true, name: true } },
         _count: { select: { sections: true, enrollments: true } },
@@ -177,7 +188,8 @@ export async function getCourses(
 }
 
 export async function getCourse(courseId: string, companyId: string, userId: string, roles: RoleType[]) {
-  await assertCourseAccess(courseId, companyId, userId, roles);
+  // allowArchived=true so admin detail page works for archived courses too
+  await assertCourseAccess(courseId, companyId, userId, roles, false, true);
 
   const [result, enrolledCount] = await Promise.all([
     prisma.course.findUnique({
@@ -236,12 +248,190 @@ export async function deleteCourse(
   userId: string,
   roles: RoleType[],
 ) {
-  const course = await assertCourseAccess(courseId, companyId, userId, roles, true);
+  // Allow deleting both draft (isActive=true) and archived (isActive=false) courses
+  await assertCourseAccess(courseId, companyId, userId, roles, true, true);
 
   const enrollCount = await prisma.enrollment.count({ where: { courseId } });
-  if (enrollCount > 0) throw new ConflictError('Không thể xóa khóa học đã có học viên');
+  if (enrollCount > 0) {
+    throw new ConflictError(`Không thể xóa: có ${enrollCount} học viên đã đăng ký. Hãy dừng khóa học thay vì xóa.`);
+  }
+
+  // Collect lesson IDs and ContentAsset storagePaths before delete
+  const lessons = await prisma.lesson.findMany({
+    where: { section: { courseId } },
+    select: { id: true },
+  });
+  const lessonIds = lessons.map((l) => l.id);
+
+  // Direct-FK ContentAssets (legacy — exclusive to one lesson)
+  const directAssets = lessonIds.length > 0
+    ? await prisma.contentAsset.findMany({
+        where: { lessonId: { in: lessonIds } },
+        select: { id: true, storagePath: true },
+      })
+    : [];
+
+  // Junction-linked ContentAssets used ONLY by this course's lessons
+  const exclusiveJunctionAssets = lessonIds.length > 0
+    ? await prisma.contentAsset.findMany({
+        where: {
+          lessonId: null,
+          lessonLinks: { some: { lessonId: { in: lessonIds } } },
+          NOT: { lessonLinks: { some: { lessonId: { notIn: lessonIds } } } },
+        },
+        select: { id: true, storagePath: true },
+      })
+    : [];
+
+  const allAssetIds = [
+    ...directAssets.map((a) => a.id),
+    ...exclusiveJunctionAssets.map((a) => a.id),
+  ];
+  const allStoragePaths = [
+    ...directAssets.map((a) => a.storagePath),
+    ...exclusiveJunctionAssets.map((a) => a.storagePath),
+  ].filter((p): p is string => Boolean(p));
+
+  // Get LearningPathStep IDs for cascade cleanup
+  const pathSteps = await prisma.learningPathStep.findMany({
+    where: { courseId },
+    select: { id: true },
+  });
+  const pathStepIds = pathSteps.map((s) => s.id);
+
+  await prisma.$transaction(async (tx) => {
+    // Clean up LearningPathStepEnrollment before deleting steps (no cascade)
+    if (pathStepIds.length > 0) {
+      await tx.learningPathStepEnrollment.deleteMany({
+        where: { learningPathStepId: { in: pathStepIds } },
+      });
+    }
+    await tx.competencyCourseLink.deleteMany({ where: { courseId } });
+    await tx.learningPathStep.deleteMany({ where: { courseId } });
+    await tx.groupCourse.deleteMany({ where: { courseId } });
+    await tx.courseAssignment.deleteMany({ where: { courseId } });
+    await tx.coursePublication.deleteMany({ where: { courseId } });
+    await tx.courseRating.deleteMany({ where: { courseId } });
+    // Delete ContentAssets (before Course delete to avoid FK issues on Lesson)
+    if (allAssetIds.length > 0) {
+      await tx.contentAsset.deleteMany({ where: { id: { in: allAssetIds } } });
+    }
+    // Hard delete course — cascades: CourseSection → Lesson → (LessonAsset, QuizConfig)
+    await tx.course.delete({ where: { id: courseId } });
+  });
+
+  await invalidateCourseCache(courseId);
+
+  // Fire-and-forget MinIO cleanup (non-critical)
+  for (const path of allStoragePaths) {
+    minioClient.removeObject(BUCKET_PRIVATE, path, (err?: Error) => {
+      if (err) console.error('[Delete] MinIO cleanup failed:', path, err);
+    });
+  }
+}
+
+// ── Archive / Unarchive / Unpublish ──────────────────────────────
+
+export async function getArchiveImpact(
+  courseId: string,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  await assertCourseAccess(courseId, companyId, userId, roles, false, true);
+
+  const [activeEnrollments, inProgressEnrollments, groupCount, pathStepCount, activePublications] =
+    await Promise.all([
+      prisma.enrollment.count({ where: { courseId } }),
+      prisma.enrollment.count({ where: { courseId, completedAt: null } }),
+      prisma.groupCourse.count({ where: { courseId } }),
+      prisma.learningPathStep.count({ where: { courseId } }),
+      prisma.coursePublication.count({ where: { courseId, revokedAt: null } }),
+    ]);
+
+  return { activeEnrollments, inProgressEnrollments, groupCount, pathStepCount, activePublications };
+}
+
+export async function getDeleteImpact(
+  courseId: string,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  await assertCourseAccess(courseId, companyId, userId, roles, false, true);
+
+  const [enrollmentCount, groupCount, pathStepCount, assetCount, publicationCount] =
+    await Promise.all([
+      prisma.enrollment.count({ where: { courseId } }),
+      prisma.groupCourse.count({ where: { courseId } }),
+      prisma.learningPathStep.count({ where: { courseId } }),
+      prisma.contentAsset.count({ where: { lesson: { section: { courseId } } } }),
+      prisma.coursePublication.count({ where: { courseId } }),
+    ]);
+
+  return {
+    canDelete: enrollmentCount === 0,
+    enrollmentCount,
+    groupCount,
+    pathStepCount,
+    assetCount,
+    publicationCount,
+  };
+}
+
+export async function archiveCourse(
+  courseId: string,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+  revokePublications = false,
+) {
+  await assertCourseAccess(courseId, companyId, userId, roles, true);
 
   await prisma.course.update({ where: { id: courseId }, data: { isActive: false } });
+
+  if (revokePublications) {
+    await prisma.coursePublication.updateMany({
+      where: { courseId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  await invalidateCourseCache(courseId);
+}
+
+export async function unarchiveCourse(
+  courseId: string,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  // Must allow archived (isActive=false) courses
+  await assertCourseAccess(courseId, companyId, userId, roles, true, true);
+
+  await prisma.course.update({ where: { id: courseId }, data: { isActive: true } });
+  await invalidateCourseCache(courseId);
+}
+
+export async function unpublishCourse(
+  courseId: string,
+  companyId: string,
+  userId: string,
+  roles: RoleType[],
+) {
+  await assertCourseAccess(courseId, companyId, userId, roles, true);
+
+  const count = await prisma.enrollment.count({ where: { courseId } });
+  if (count > 0) {
+    throw new ConflictError(
+      `Không thể về bản nháp: có ${count} học viên đã đăng ký. Hãy dùng chức năng "Dừng khóa học" thay thế.`,
+    );
+  }
+
+  await prisma.course.update({
+    where: { id: courseId },
+    data: { isPublished: false, isActive: true },
+  });
   await invalidateCourseCache(courseId);
 }
 

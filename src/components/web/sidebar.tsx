@@ -47,6 +47,8 @@ const NAV_ITEMS: NavItem[] = [
     roles: ['instructor','company_admin','hr_manager','group_admin','group_hrm'] },
   { href: '/reports',               label: 'Báo cáo',             icon: BarChart2,       mobileVisible: false, group: 'manage',
     roles: ['group_admin','group_hrm','company_admin','hr_manager'] },
+  { href: '/reports/ai-usage',      label: 'Báo cáo AI',          icon: Cpu,             mobileVisible: false, group: 'manage',
+    roles: ['group_admin'] },
   { href: '/my-department',         label: 'Bộ phận của tôi',     icon: Building2,       mobileVisible: false, group: 'manage',
     roles: ['dept_head','company_admin','hr_manager'] },
   { href: '/ai-config',             label: 'Cấu hình AI',         icon: Cpu,             mobileVisible: false, group: 'manage',

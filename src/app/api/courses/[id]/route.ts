@@ -44,6 +44,7 @@ export const DELETE = withRole(
   ['group_admin', 'company_admin', 'instructor'],
   async (req: NextRequest, { params, user, companyId }) => {
     try {
+      // getCourse allows archived so we can log the title before deletion
       const course = await getCourse(params!.id, companyId, user.id, user.roles);
       await deleteCourse(params!.id, companyId, user.id, user.roles);
 

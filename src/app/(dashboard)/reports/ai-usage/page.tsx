@@ -120,6 +120,15 @@ export default function AiUsageReportPage() {
 
   const t = data?.totals;
 
+  // Guard: only group_admin can access this page
+  if (user && !isGroupAdmin) {
+    return (
+      <div className="bg-surface rounded-xl border border-default shadow-card py-16 text-center text-[12px] text-faint">
+        Bạn không có quyền truy cập trang này.
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {/* Header */}

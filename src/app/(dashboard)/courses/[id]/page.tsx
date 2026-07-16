@@ -25,10 +25,28 @@ interface Course {
   description: string | null;
   thumbnailUrl: string | null;
   isPublished: boolean;
+  isActive: boolean;
   level: string | null;
   estimatedHours: number | null;
   ownerCompanyId?: string;
   sections: Section[];
+}
+
+interface ArchiveImpact {
+  activeEnrollments: number;
+  inProgressEnrollments: number;
+  groupCount: number;
+  pathStepCount: number;
+  activePublications: number;
+}
+
+interface DeleteImpact {
+  canDelete: boolean;
+  enrollmentCount: number;
+  groupCount: number;
+  pathStepCount: number;
+  assetCount: number;
+  publicationCount: number;
 }
 
 interface LearningGroup {
@@ -352,6 +370,21 @@ export default function CourseEditorPage() {
 
   const [confirmPublish, setConfirmPublish] = useState(false);
 
+  // Archive / Unarchive / Unpublish / Delete state
+  const [archiveModal, setArchiveModal] = useState(false);
+  const [archiveImpact, setArchiveImpact] = useState<ArchiveImpact | null>(null);
+  const [archiveImpactLoading, setArchiveImpactLoading] = useState(false);
+  const [revokePublications, setRevokePublications] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [unarchiving, setUnarchiving] = useState(false);
+  const [unpublishModal, setUnpublishModal] = useState(false);
+  const [unpublishing, setUnpublishing] = useState(false);
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deleteImpact, setDeleteImpact] = useState<DeleteImpact | null>(null);
+  const [deleteImpactLoading, setDeleteImpactLoading] = useState(false);
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   const handlePublish = async () => {
     if (!confirmPublish) { setConfirmPublish(true); return; }
     setConfirmPublish(false);
@@ -534,6 +567,94 @@ export default function CourseEditorPage() {
     return handleAssignToUser();
   };
 
+  // ── Archive / Unarchive / Unpublish / Delete handlers ──────────
+
+  const openArchiveModal = async () => {
+    setArchiveModal(true);
+    setArchiveImpact(null);
+    setRevokePublications(false);
+    setArchiveImpactLoading(true);
+    try {
+      const res = await fetch(`/api/courses/${id}/archive`, { headers: { Authorization: `Bearer ${accessToken}` } }).then((r) => r.json());
+      if (res.success) setArchiveImpact(res.data);
+    } catch { /* ignore */ }
+    finally { setArchiveImpactLoading(false); }
+  };
+
+  const handleArchive = async () => {
+    setArchiving(true);
+    try {
+      const res = await fetch(`/api/courses/${id}/archive`, {
+        method: 'POST', headers: authHeader,
+        body: JSON.stringify({ revokePublications }),
+      }).then((r) => r.json());
+      if (res.success) {
+        toast('success', 'Đã dừng khóa học. Học viên đang học vẫn tiếp tục truy cập được.');
+        setArchiveModal(false);
+        load();
+      } else {
+        toast('error', res.error ?? 'Dừng khóa học thất bại');
+      }
+    } catch { toast('error', 'Lỗi kết nối'); }
+    finally { setArchiving(false); }
+  };
+
+  const handleUnarchive = async () => {
+    setUnarchiving(true);
+    try {
+      const res = await fetch(`/api/courses/${id}/archive`, { method: 'DELETE', headers: authHeader }).then((r) => r.json());
+      if (res.success) {
+        toast('success', 'Đã khôi phục khóa học');
+        load();
+      } else {
+        toast('error', res.error ?? 'Khôi phục thất bại');
+      }
+    } catch { toast('error', 'Lỗi kết nối'); }
+    finally { setUnarchiving(false); }
+  };
+
+  const handleUnpublish = async () => {
+    setUnpublishing(true);
+    try {
+      const res = await fetch(`/api/courses/${id}/unpublish`, { method: 'POST', headers: authHeader }).then((r) => r.json());
+      if (res.success) {
+        toast('success', 'Đã đưa khóa học về bản nháp');
+        setUnpublishModal(false);
+        load();
+      } else {
+        toast('error', res.error ?? 'Thất bại');
+      }
+    } catch { toast('error', 'Lỗi kết nối'); }
+    finally { setUnpublishing(false); }
+  };
+
+  const openDeleteModal = async () => {
+    setDeleteModal(true);
+    setDeleteImpact(null);
+    setDeleteConfirmed(false);
+    setDeleteImpactLoading(true);
+    try {
+      const res = await fetch(`/api/courses/${id}/delete-impact`, { headers: { Authorization: `Bearer ${accessToken}` } }).then((r) => r.json());
+      if (res.success) setDeleteImpact(res.data);
+    } catch { /* ignore */ }
+    finally { setDeleteImpactLoading(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteConfirmed) { setDeleteConfirmed(true); return; }
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/courses/${id}`, { method: 'DELETE', headers: authHeader }).then((r) => r.json());
+      if (res.success) {
+        toast('success', 'Đã xóa vĩnh viễn khóa học');
+        router.push('/courses');
+      } else {
+        toast('error', res.error ?? 'Xóa thất bại');
+      }
+    } catch { toast('error', 'Lỗi kết nối'); }
+    finally { setDeleting(false); setDeleteModal(false); }
+  };
+
   // Render states
   if (isLoading) return (
     <div className="flex items-center justify-center py-16">
@@ -654,12 +775,19 @@ export default function CourseEditorPage() {
               )}
 
               <div className="flex items-center gap-2 mt-1">
-                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                  course.isPublished ? 'bg-success-tint text-success' : 'bg-muted text-faint'
-                }`}>
-                  {course.isPublished && <span className="w-1.5 h-1.5 bg-success rounded-full" />}
-                  {course.isPublished ? 'Đã xuất bản' : 'Bản nháp'}
-                </span>
+                {course.isPublished && !course.isActive ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
+                    <span className="w-1.5 h-1.5 bg-orange-500 rounded-full" />
+                    Đã dừng
+                  </span>
+                ) : (
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                    course.isPublished ? 'bg-success-tint text-success' : 'bg-muted text-faint'
+                  }`}>
+                    {course.isPublished && <span className="w-1.5 h-1.5 bg-success rounded-full" />}
+                    {course.isPublished ? 'Đã xuất bản' : 'Bản nháp'}
+                  </span>
+                )}
                 {course.level && <span className="text-[11px] text-faint">{course.level}</span>}
                 {course.estimatedHours != null && <span className="text-[11px] text-faint">{course.estimatedHours}h</span>}
               </div>
@@ -668,44 +796,61 @@ export default function CourseEditorPage() {
           </div>
         </div>
 
-        {!course.isPublished && !isSharedCourse && (
+        {!isSharedCourse && (
           <div className="flex flex-col items-end gap-2 shrink-0">
-            {readiness && !readiness.isReady && (
-              <div className="text-[11px] bg-warning-tint border border-warning/20 text-warning rounded-lg px-3 py-2 max-w-xs text-right space-y-0.5">
-                {readiness.processingLessons.length > 0 && (
-                  <div>⏳ {readiness.processingLessons.length} bài đang xử lý</div>
+            {/* Draft course — show readiness + publish button */}
+            {!course.isPublished && (
+              <>
+                {readiness && !readiness.isReady && (
+                  <div className="text-[11px] bg-warning-tint border border-warning/20 text-warning rounded-lg px-3 py-2 max-w-xs text-right space-y-0.5">
+                    {readiness.processingLessons.length > 0 && <div>⏳ {readiness.processingLessons.length} bài đang xử lý</div>}
+                    {readiness.notReadyLessons.length > 0 && <div>✗ {readiness.notReadyLessons.length} bài chưa có nội dung</div>}
+                    {readiness.sectionsCount === 0 && <div>✗ Chưa có chương nào</div>}
+                    {readiness.totalLessons === 0 && readiness.sectionsCount > 0 && <div>✗ Chưa có bài học nào</div>}
+                  </div>
                 )}
-                {readiness.notReadyLessons.length > 0 && (
-                  <div>✗ {readiness.notReadyLessons.length} bài chưa có nội dung</div>
+                {confirmPublish ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] text-subtle">Xuất bản khóa học?</span>
+                    <button onClick={handlePublish} disabled={publishing} className="px-3 py-1.5 bg-success hover:bg-success/90 text-white text-[12px] font-medium rounded-lg disabled:opacity-50 transition-colors">
+                      {publishing ? 'Đang xuất bản...' : 'Xác nhận'}
+                    </button>
+                    <button onClick={() => setConfirmPublish(false)} className="px-3 py-1.5 border border-default text-[12px] rounded-lg hover:bg-muted transition-colors">Hủy</button>
+                  </div>
+                ) : (
+                  <button onClick={handlePublish} className="px-4 py-2 bg-success hover:bg-success/90 text-white text-[12px] font-medium rounded-lg transition-colors">
+                    ✓ Xuất bản
+                  </button>
                 )}
-                {readiness.sectionsCount === 0 && <div>✗ Chưa có chương nào</div>}
-                {readiness.totalLessons === 0 && readiness.sectionsCount > 0 && <div>✗ Chưa có bài học nào</div>}
+                {/* Delete draft (no learners) */}
+                <button onClick={openDeleteModal} className="px-3 py-1.5 text-[11px] text-danger hover:bg-danger/10 rounded-lg transition-colors border border-danger/20">
+                  Xóa vĩnh viễn
+                </button>
+              </>
+            )}
+
+            {/* Published & active — show archive + unpublish buttons */}
+            {course.isPublished && course.isActive && (
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <button onClick={() => setUnpublishModal(true)} className="px-3 py-1.5 text-[11px] text-subtle hover:text-content border border-default rounded-lg hover:bg-muted transition-colors">
+                  Về bản nháp
+                </button>
+                <button onClick={openArchiveModal} className="px-3 py-1.5 text-[12px] font-medium text-orange-700 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg transition-colors">
+                  ⏸ Dừng khóa học
+                </button>
               </div>
             )}
-            {confirmPublish ? (
+
+            {/* Archived — show restore + delete buttons */}
+            {course.isPublished && !course.isActive && (
               <div className="flex items-center gap-2">
-                <span className="text-[12px] text-subtle">Xuất bản khóa học?</span>
-                <button
-                  onClick={handlePublish}
-                  disabled={publishing}
-                  className="px-3 py-1.5 bg-success hover:bg-success/90 text-white text-[12px] font-medium rounded-lg disabled:opacity-50 transition-colors"
-                >
-                  {publishing ? 'Đang xuất bản...' : 'Xác nhận'}
+                <button onClick={handleUnarchive} disabled={unarchiving} className="px-3 py-1.5 text-[12px] font-medium text-success bg-success-tint hover:bg-success/10 border border-success/20 rounded-lg disabled:opacity-50 transition-colors">
+                  {unarchiving ? 'Đang khôi phục...' : '▶ Khôi phục'}
                 </button>
-                <button
-                  onClick={() => setConfirmPublish(false)}
-                  className="px-3 py-1.5 border border-default text-[12px] rounded-lg hover:bg-muted transition-colors"
-                >
-                  Hủy
+                <button onClick={openDeleteModal} className="px-3 py-1.5 text-[11px] text-danger hover:bg-danger/10 rounded-lg transition-colors border border-danger/20">
+                  Xóa vĩnh viễn
                 </button>
               </div>
-            ) : (
-              <button
-                onClick={handlePublish}
-                className="px-4 py-2 bg-success hover:bg-success/90 text-white text-[12px] font-medium rounded-lg transition-colors"
-              >
-                ✓ Xuất bản
-              </button>
             )}
           </div>
         )}
@@ -1724,6 +1869,141 @@ export default function CourseEditorPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Dừng khóa học (Archive) ── */}
+      {archiveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-surface rounded-xl shadow-card border border-default w-full max-w-md p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[14px] font-medium text-content">Dừng khóa học</h2>
+              <button onClick={() => setArchiveModal(false)} className="text-faint hover:text-content">✕</button>
+            </div>
+            {archiveImpactLoading ? (
+              <div className="flex justify-center py-6">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : archiveImpact ? (
+              <div className="space-y-3 text-[12px]">
+                <p className="text-subtle">Khóa học sẽ không xuất hiện cho học viên mới và không thể giao thêm.</p>
+                {archiveImpact.activeEnrollments > 0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1">
+                    <p className="text-blue-800 font-medium">Học viên đang học ({archiveImpact.activeEnrollments} người)</p>
+                    <p className="text-blue-700">
+                      {archiveImpact.inProgressEnrollments > 0
+                        ? `${archiveImpact.inProgressEnrollments} học viên đang tiến hành sẽ vẫn truy cập và học bình thường.`
+                        : 'Các học viên đã đăng ký vẫn truy cập được.'}
+                    </p>
+                  </div>
+                )}
+                {(archiveImpact.groupCount > 0 || archiveImpact.pathStepCount > 0) && (
+                  <div className="bg-warning-tint border border-warning/20 rounded-lg px-3 py-2 space-y-0.5">
+                    {archiveImpact.groupCount > 0 && <p className="text-warning">⚠ {archiveImpact.groupCount} nhóm học tập đang dùng khóa học này (không giao thêm được)</p>}
+                    {archiveImpact.pathStepCount > 0 && <p className="text-warning">⚠ {archiveImpact.pathStepCount} bước lộ trình học sẽ bị khóa</p>}
+                  </div>
+                )}
+                {archiveImpact.activePublications > 0 && (
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={revokePublications}
+                      onChange={(e) => setRevokePublications(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span className="text-content">
+                      Thu hồi tất cả {archiveImpact.activePublications} lần chia sẻ với công ty khác
+                      <span className="block text-faint text-[11px] mt-0.5">Khi khôi phục, khóa học sẽ không tự động hiện lại ở các công ty đó</span>
+                    </span>
+                  </label>
+                )}
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setArchiveModal(false)} className="px-4 py-2 border border-default text-[12px] rounded-lg hover:bg-muted transition-colors">Hủy</button>
+              <button
+                onClick={handleArchive}
+                disabled={archiving || archiveImpactLoading}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-[12px] font-medium rounded-lg disabled:opacity-50 transition-colors"
+              >
+                {archiving ? 'Đang dừng...' : 'Xác nhận dừng'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Về bản nháp (Unpublish) ── */}
+      {unpublishModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-surface rounded-xl shadow-card border border-default w-full max-w-sm p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[14px] font-medium text-content">Về bản nháp</h2>
+              <button onClick={() => setUnpublishModal(false)} className="text-faint hover:text-content">✕</button>
+            </div>
+            <p className="text-[12px] text-subtle">Khóa học sẽ về bản nháp và không còn hiển thị cho học viên. Bạn có thể chỉnh sửa và xuất bản lại sau.</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setUnpublishModal(false)} className="px-4 py-2 border border-default text-[12px] rounded-lg hover:bg-muted transition-colors">Hủy</button>
+              <button
+                onClick={handleUnpublish}
+                disabled={unpublishing}
+                className="px-4 py-2 bg-warning hover:bg-warning/90 text-white text-[12px] font-medium rounded-lg disabled:opacity-50 transition-colors"
+              >
+                {unpublishing ? 'Đang xử lý...' : 'Về bản nháp'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Xóa vĩnh viễn ── */}
+      {deleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-surface rounded-xl shadow-card border border-default w-full max-w-md p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[14px] font-medium text-danger">Xóa vĩnh viễn khóa học</h2>
+              <button onClick={() => setDeleteModal(false)} className="text-faint hover:text-content">✕</button>
+            </div>
+            {deleteImpactLoading ? (
+              <div className="flex justify-center py-6">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : deleteImpact ? (
+              <div className="space-y-3 text-[12px]">
+                {!deleteImpact.canDelete ? (
+                  <div className="bg-danger-tint border border-danger/20 rounded-lg px-3 py-2 text-danger">
+                    <p className="font-medium">Không thể xóa</p>
+                    <p>Có {deleteImpact.enrollmentCount} học viên đã đăng ký. Hãy dừng khóa học thay vì xóa.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="bg-danger-tint border border-danger/20 rounded-lg px-3 py-2 text-danger space-y-1">
+                      <p className="font-medium">⚠ Hành động này không thể hoàn tác</p>
+                      {deleteImpact.assetCount > 0 && <p>{deleteImpact.assetCount} file sẽ bị xóa khỏi storage</p>}
+                      {deleteImpact.groupCount > 0 && <p>Sẽ xóa khỏi {deleteImpact.groupCount} nhóm học tập</p>}
+                      {deleteImpact.pathStepCount > 0 && <p>Sẽ xóa {deleteImpact.pathStepCount} bước lộ trình học</p>}
+                      {deleteImpact.publicationCount > 0 && <p>Sẽ thu hồi {deleteImpact.publicationCount} lần chia sẻ</p>}
+                    </div>
+                    {deleteConfirmed && (
+                      <p className="text-danger font-medium text-center">Nhấn &quot;Xóa vĩnh viễn&quot; lần nữa để xác nhận</p>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => { setDeleteModal(false); setDeleteConfirmed(false); }} className="px-4 py-2 border border-default text-[12px] rounded-lg hover:bg-muted transition-colors">Hủy</button>
+              {deleteImpact?.canDelete && (
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting || deleteImpactLoading}
+                  className="px-4 py-2 bg-danger hover:bg-danger/90 text-white text-[12px] font-medium rounded-lg disabled:opacity-50 transition-colors"
+                >
+                  {deleting ? 'Đang xóa...' : deleteConfirmed ? 'Xóa vĩnh viễn' : 'Tiếp tục'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

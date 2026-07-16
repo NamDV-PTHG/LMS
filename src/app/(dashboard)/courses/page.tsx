@@ -13,6 +13,7 @@ interface Course {
   title: string;
   description: string | null;
   isPublished: boolean;
+  isActive: boolean;
   estimatedHours: number | null;
   isShared: boolean;
   ownerCompany: { id: string; name: string };
@@ -140,12 +141,19 @@ export default function CoursesPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                        c.isPublished ? 'bg-success-tint text-success' : 'bg-muted text-faint'
-                      }`}>
-                        {c.isPublished && <span className="w-1.5 h-1.5 bg-success rounded-full" />}
-                        {c.isPublished ? 'Đã xuất bản' : 'Bản nháp'}
-                      </span>
+                      {c.isPublished && !c.isActive ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
+                          <span className="w-1.5 h-1.5 bg-orange-500 rounded-full" />
+                          Đã dừng
+                        </span>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                          c.isPublished ? 'bg-success-tint text-success' : 'bg-muted text-faint'
+                        }`}>
+                          {c.isPublished && <span className="w-1.5 h-1.5 bg-success rounded-full" />}
+                          {c.isPublished ? 'Đã xuất bản' : 'Bản nháp'}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right text-[11px] text-subtle">
                       {c.estimatedHours != null ? `${c.estimatedHours}h` : '—'}
