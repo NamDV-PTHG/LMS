@@ -4,7 +4,7 @@ import { useAuth } from '@/components/providers/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Plus, X, Building2 } from 'lucide-react';
+import { Plus, X, Building2, AlertTriangle, GitBranch, ChevronDown } from 'lucide-react';
 
 interface Organization {
   id: string;
@@ -16,6 +16,27 @@ interface Organization {
   address?: string | null;
   phone?: string | null;
   description?: string | null;
+}
+
+type AutoAssignStatus =
+  | 'assign' | 'reassign' | 'no_change'
+  | 'keep_current' | 'already_assigned' | 'unresolvable';
+
+interface AutoAssignItem {
+  id: string;
+  name: string;
+  code: string;
+  currentParentId: string | null;
+  currentParentName: string | null;
+  proposedParentId: string | null;
+  proposedParentName: string | null;
+  proposedParentCode: string | null;
+  status: AutoAssignStatus;
+}
+
+interface AutoAssignResult {
+  preview: AutoAssignItem[];
+  summary: { willAssign: number; noChange: number; unresolvable: number; keepCurrent: number };
 }
 
 const ORG_TYPE_LABEL: Record<string, string> = {
@@ -56,6 +77,15 @@ export default function OrganizationsPage() {
   const [savingAdmin, setSavingAdmin] = useState(false);
   const [adminError, setAdminError] = useState<string | null>(null);
 
+  // Auto-assign state
+  const [autoAssignModal, setAutoAssignModal] = useState(false);
+  const [autoAssignForce, setAutoAssignForce] = useState(false);
+  const [autoAssignData, setAutoAssignData] = useState<AutoAssignResult | null>(null);
+  const [autoAssignLoading, setAutoAssignLoading] = useState(false);
+  const [autoAssignExecuting, setAutoAssignExecuting] = useState(false);
+  const [autoAssignError, setAutoAssignError] = useState<string | null>(null);
+  const [autoAssignShowAll, setAutoAssignShowAll] = useState(false);
+
   const getRole = (r: unknown): string =>
     typeof r === 'string' ? r : (r as { role: string }).role;
   const userRoles = user?.roles?.map(getRole) ?? [];
@@ -78,6 +108,62 @@ export default function OrganizationsPage() {
   };
 
   useEffect(() => { load(); }, [accessToken]); // eslint-disable-line
+
+  const fetchAutoAssignPreview = async (force: boolean) => {
+    setAutoAssignLoading(true);
+    setAutoAssignError(null);
+    setAutoAssignData(null);
+    setAutoAssignShowAll(false);
+    try {
+      const res = await fetch('/api/organizations/auto-assign', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ preview: true, forceReassign: force }),
+      }).then((r) => r.json());
+      if (res.success) setAutoAssignData(res.data);
+      else setAutoAssignError(res.error ?? 'Lỗi tải dữ liệu');
+    } catch {
+      setAutoAssignError('Lỗi kết nối server');
+    } finally {
+      setAutoAssignLoading(false);
+    }
+  };
+
+  const handleOpenAutoAssign = () => {
+    setAutoAssignModal(true);
+    setAutoAssignForce(false);
+    fetchAutoAssignPreview(false);
+  };
+
+  const handleForceToggle = (checked: boolean) => {
+    setAutoAssignForce(checked);
+    fetchAutoAssignPreview(checked);
+  };
+
+  const handleConfirmAutoAssign = async () => {
+    setAutoAssignExecuting(true);
+    setAutoAssignError(null);
+    try {
+      const res = await fetch('/api/organizations/auto-assign', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ preview: false, forceReassign: autoAssignForce }),
+      }).then((r) => r.json());
+      if (res.success) {
+        setAutoAssignModal(false);
+        setAutoAssignForce(false);
+        setAutoAssignData(null);
+        toast('success', `Đã gắn ${res.data.summary.willAssign} phòng ban vào sơ đồ`);
+        load();
+      } else {
+        setAutoAssignError(res.error ?? 'Lỗi thực thi');
+      }
+    } catch {
+      setAutoAssignError('Lỗi kết nối server');
+    } finally {
+      setAutoAssignExecuting(false);
+    }
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,22 +245,32 @@ export default function OrganizationsPage() {
         <p className="text-[12px] text-subtle">
           {orgs.length > 0 ? `${orgs.length} tổ chức trong hệ thống` : 'Danh sách tổ chức'}
         </p>
-        {isGroupAdmin && (
-          <button
-            onClick={() => { setForm((f) => ({ ...f, type: 'company' })); setShowCreate(true); }}
-            className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg px-3 py-2 transition-colors active:scale-[0.98]"
-          >
-            <Plus size={14} /> Tạo công ty
-          </button>
-        )}
-        {isCompanyAdmin && (
-          <button
-            onClick={() => { setForm((f) => ({ ...f, type: 'dept' })); setShowCreate(true); }}
-            className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg px-3 py-2 transition-colors active:scale-[0.98]"
-          >
-            <Plus size={14} /> Tạo phòng ban
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {(isGroupAdmin || isCompanyAdmin) && others.length > 0 && (
+            <button
+              onClick={handleOpenAutoAssign}
+              className="flex items-center gap-1.5 border border-default text-subtle text-[12px] font-medium rounded-lg px-3 py-2 hover:bg-muted transition-colors active:scale-[0.98]"
+            >
+              <GitBranch size={14} /> Tự động gắn sơ đồ
+            </button>
+          )}
+          {isGroupAdmin && (
+            <button
+              onClick={() => { setForm((f) => ({ ...f, type: 'company' })); setShowCreate(true); }}
+              className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg px-3 py-2 transition-colors active:scale-[0.98]"
+            >
+              <Plus size={14} /> Tạo công ty
+            </button>
+          )}
+          {isCompanyAdmin && (
+            <button
+              onClick={() => { setForm((f) => ({ ...f, type: 'dept' })); setShowCreate(true); }}
+              className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white text-[12px] font-medium rounded-lg px-3 py-2 transition-colors active:scale-[0.98]"
+            >
+              <Plus size={14} /> Tạo phòng ban
+            </button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (
@@ -233,7 +329,15 @@ export default function OrganizationsPage() {
           {/* Other org types */}
           {others.length > 0 && (
             <div className="space-y-3">
-              <p className="text-[9px] font-medium text-faint uppercase tracking-widest">Đơn vị khác ({others.length})</p>
+              <div className="flex items-center justify-between">
+                <p className="text-[9px] font-medium text-faint uppercase tracking-widest">Đơn vị khác ({others.length})</p>
+                {others.filter((o) => o.parentId === null).length > 0 && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-warning-tint text-warning border border-warning/20">
+                    <AlertTriangle size={10} />
+                    {others.filter((o) => o.parentId === null).length} chưa gán vào sơ đồ
+                  </span>
+                )}
+              </div>
               <div className="bg-surface border border-default rounded-xl shadow-card overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -243,6 +347,7 @@ export default function OrganizationsPage() {
                         <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Mã</th>
                         <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Loại</th>
                         <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Trạng thái</th>
+                        <th className="text-left text-[10px] text-faint font-medium px-4 py-2.5">Vị trí sơ đồ</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -262,6 +367,19 @@ export default function OrganizationsPage() {
                               {org.isActive && <span className="w-1.5 h-1.5 bg-success rounded-full" />}
                               {org.isActive ? 'Hoạt động' : 'Vô hiệu'}
                             </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {org.parentId !== null ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-success-tint text-success">
+                                <span className="w-1.5 h-1.5 bg-success rounded-full" />
+                                Đã gán
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-warning-tint text-warning">
+                                <AlertTriangle size={10} />
+                                Chưa gán
+                              </span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -432,6 +550,212 @@ export default function OrganizationsPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-assign modal */}
+      {autoAssignModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-surface rounded-xl shadow-card border border-default w-full max-w-2xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-default flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <GitBranch size={16} className="text-primary" />
+                <h2 className="text-[14px] font-medium text-content">Tự động gắn sơ đồ tổ chức</h2>
+              </div>
+              <button
+                onClick={() => { setAutoAssignModal(false); setAutoAssignForce(false); setAutoAssignData(null); }}
+                className="text-faint hover:text-content transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              {/* Force toggle */}
+              <label className="flex items-start gap-3 p-3 border border-default rounded-lg cursor-pointer hover:bg-muted transition-colors">
+                <input
+                  type="checkbox"
+                  checked={autoAssignForce}
+                  onChange={(e) => handleForceToggle(e.target.checked)}
+                  disabled={autoAssignLoading || autoAssignExecuting}
+                  className="mt-0.5 accent-primary"
+                />
+                <div>
+                  <p className="text-[12px] font-medium text-content">Chạy lại toàn bộ (kể cả đã được gán)</p>
+                  <p className="text-[11px] text-subtle mt-0.5">
+                    Dùng khi vừa tạo thêm phòng ban cấp giữa còn thiếu.
+                    Ví dụ: tạo <span className="font-mono bg-muted px-1 rounded">BGD-PC</span> → phòng ban{' '}
+                    <span className="font-mono bg-muted px-1 rounded">BGD-PC-DES</span> sẽ tự chuyển sang <span className="font-mono bg-muted px-1 rounded">BGD-PC</span>.
+                  </p>
+                </div>
+              </label>
+
+              {/* Loading */}
+              {autoAssignLoading && (
+                <div className="flex items-center gap-2 text-[12px] text-subtle py-4 justify-center">
+                  <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  Đang phân tích mã phòng ban...
+                </div>
+              )}
+
+              {/* Error */}
+              {autoAssignError && (
+                <div className="bg-danger-tint border border-danger/20 rounded-lg px-3 py-2 text-[12px] text-danger">
+                  {autoAssignError}
+                </div>
+              )}
+
+              {/* Preview */}
+              {autoAssignData && !autoAssignLoading && (() => {
+                const { preview, summary } = autoAssignData;
+                const activeRows = preview.filter((i) =>
+                  i.status === 'assign' || i.status === 'reassign' || i.status === 'unresolvable'
+                );
+                const hiddenRows = preview.filter((i) =>
+                  i.status === 'already_assigned' || i.status === 'no_change' || i.status === 'keep_current'
+                );
+
+                return (
+                  <div className="space-y-3">
+                    {/* Summary bar */}
+                    <div className={`flex items-center gap-3 px-3 py-2 rounded-lg text-[12px] border ${
+                      summary.willAssign > 0 ? 'bg-primary-tint border-primary/20 text-primary' : 'bg-muted border-default text-subtle'
+                    }`}>
+                      <span className="font-medium">{summary.willAssign} sẽ được gán</span>
+                      {summary.unresolvable > 0 && (
+                        <>
+                          <span className="text-faint">·</span>
+                          <span className="text-warning font-medium">{summary.unresolvable} không xác định được</span>
+                        </>
+                      )}
+                      {summary.keepCurrent > 0 && (
+                        <>
+                          <span className="text-faint">·</span>
+                          <span className="text-subtle">{summary.keepCurrent} giữ nguyên</span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Preview table */}
+                    {activeRows.length > 0 && (
+                      <div className="border border-default rounded-lg overflow-hidden">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-default bg-muted/40">
+                              <th className="text-left text-[10px] text-faint font-medium px-3 py-2">Phòng ban</th>
+                              <th className="text-left text-[10px] text-faint font-medium px-3 py-2">Mã</th>
+                              <th className="text-left text-[10px] text-faint font-medium px-3 py-2">Đơn vị cha đề xuất</th>
+                              <th className="text-left text-[10px] text-faint font-medium px-3 py-2">Trạng thái</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {activeRows.map((item) => (
+                              <tr key={item.id} className="border-b border-default last:border-0">
+                                <td className="px-3 py-2 text-[12px] font-medium text-content">{item.name}</td>
+                                <td className="px-3 py-2 text-[11px] font-mono text-subtle">{item.code}</td>
+                                <td className="px-3 py-2 text-[11px] text-content">
+                                  {item.status === 'reassign' ? (
+                                    <span className="flex items-center gap-1">
+                                      <span className="text-faint line-through">{item.currentParentName}</span>
+                                      <span className="text-faint">→</span>
+                                      <span className="text-primary font-medium">{item.proposedParentName}</span>
+                                    </span>
+                                  ) : item.proposedParentName ? (
+                                    <span className="text-primary font-medium">{item.proposedParentName}
+                                      <span className="text-faint font-normal ml-1">({item.proposedParentCode})</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-faint">—</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {(item.status === 'assign' || item.status === 'reassign') && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-success-tint text-success">
+                                      <span className="w-1.5 h-1.5 bg-success rounded-full" />
+                                      {item.status === 'reassign' ? 'Đổi cha' : 'Sẽ gán'}
+                                    </span>
+                                  )}
+                                  {item.status === 'unresolvable' && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-warning-tint text-warning">
+                                      <AlertTriangle size={10} />
+                                      Không xác định được
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Collapsed rows toggle */}
+                    {hiddenRows.length > 0 && (
+                      <button
+                        onClick={() => setAutoAssignShowAll((v) => !v)}
+                        className="flex items-center gap-1 text-[11px] text-subtle hover:text-content transition-colors"
+                      >
+                        <ChevronDown size={12} className={`transition-transform ${autoAssignShowAll ? 'rotate-180' : ''}`} />
+                        {autoAssignShowAll ? 'Ẩn bớt' : `Xem thêm ${hiddenRows.length} phòng ban không thay đổi`}
+                      </button>
+                    )}
+
+                    {autoAssignShowAll && hiddenRows.length > 0 && (
+                      <div className="border border-default rounded-lg overflow-hidden opacity-60">
+                        <table className="w-full">
+                          <tbody>
+                            {hiddenRows.map((item) => (
+                              <tr key={item.id} className="border-b border-default last:border-0">
+                                <td className="px-3 py-2 text-[11px] text-subtle">{item.name}</td>
+                                <td className="px-3 py-2 text-[11px] font-mono text-faint">{item.code}</td>
+                                <td className="px-3 py-2 text-[11px] text-faint">{item.currentParentName ?? '—'}</td>
+                                <td className="px-3 py-2">
+                                  <span className="text-[10px] text-faint">
+                                    {item.status === 'already_assigned' && 'Đã gán (bỏ qua)'}
+                                    {item.status === 'no_change' && 'Không thay đổi'}
+                                    {item.status === 'keep_current' && 'Giữ nguyên'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {activeRows.length === 0 && hiddenRows.length > 0 && (
+                      <p className="text-[12px] text-subtle text-center py-3">
+                        Tất cả phòng ban đã được gán đúng vị trí.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-4 border-t border-default flex items-center justify-between gap-3 shrink-0">
+              <button
+                onClick={() => { setAutoAssignModal(false); setAutoAssignForce(false); setAutoAssignData(null); }}
+                disabled={autoAssignExecuting}
+                className="px-4 py-2 text-[12px] border border-default rounded-lg text-subtle hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleConfirmAutoAssign}
+                disabled={autoAssignExecuting || autoAssignLoading || !autoAssignData || autoAssignData.summary.willAssign === 0}
+                className="flex items-center gap-2 px-4 py-2 text-[12px] bg-primary hover:bg-primary-dark text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+              >
+                {autoAssignExecuting && <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                {autoAssignExecuting
+                  ? 'Đang thực thi...'
+                  : `Xác nhận gán ${autoAssignData?.summary.willAssign ?? 0} phòng ban`}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -3,6 +3,71 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-17 10:30] Fix: Chấm điểm quiz sai sau khi cập nhật đáp án
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/quiz.service.ts:389` — Sửa bug TypeScript: biến `questions` không được định nghĩa trong `submitQuiz()`, fallback về `questionIds.length` thay vì crash
+- `src/app/api/admin/quiz-backfill-snapshots/route.ts` — Tạo mới: endpoint `POST /api/admin/quiz-backfill-snapshots` để backfill `correctAnswers` snapshot vào legacy attempts chưa nộp (tạo trước commit 06886d0)
+- `src/app/api/lessons/[lessonId]/regrade/route.ts` — Tạo mới: endpoint `POST /api/lessons/[lessonId]/regrade?preview=true|false` để chấm lại attempt đã nộp theo đáp án DB hiện tại khi instructor sửa đáp án sai
+- `src/app/api/lessons/[lessonId]/quiz-import/route.ts` — Thêm `mode=replace`: archive câu hỏi cũ (status→archived) trước khi import bộ câu hỏi mới, tránh trùng lặp trong pool
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+
+**Lưu ý / Rủi ro:**
+- **VIỆC CẦN LÀM NGAY**: Gọi `POST /api/admin/quiz-backfill-snapshots?dryRun=true` để kiểm tra số legacy attempts cần fix, sau đó gọi không có `dryRun` để backfill — cần làm TRƯỚC khi sửa thêm bất kỳ đáp án nào
+- Re-grade là thao tác không hoàn tác: luôn chạy `?preview=true` trước để xem trước ảnh hưởng
+- Câu hỏi `archived` không bị xóa khỏi DB, snapshot của attempt cũ vẫn tra cứu được để hiển thị kết quả
+
+## [2026-07-17 10:30] Tự động gắn sơ đồ tổ chức theo mã phòng ban
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/services/organization.service.ts`: Thêm `autoAssignOrgChart(companyId, preview, forceReassign)` — thuật toán walk-up prefix để suy ra cha từ mã phòng ban dạng `LEVEL1-LEVEL2-LEVEL3`
+- `src/app/api/organizations/auto-assign/route.ts`: File mới — POST `{ preview, forceReassign }` — trả về preview hoặc thực thi gán hàng loạt
+- `src/app/(dashboard)/organizations/page.tsx`: Nút "Tự động gắn sơ đồ" + modal xem trước có checkbox "Chạy lại toàn bộ"
+
+**Kết quả:**
+- Chế độ thường: chỉ gán org `parentId=null`, idempotent
+- Chế độ force: gán đè cả org đã có cha (dùng khi tạo thêm phòng ban cấp giữa)
+- Org không tìm được cha mới (`keep_current`) không bị xóa parentId
+- Build thành công, `pm2 restart lms-web` → online
+
+**Lưu ý / Rủi ro:**
+- Giả định dấu `-` là separator cấp bậc — admin nên kiểm tra preview trước khi xác nhận
+
+## [2026-07-17 09:00] Fix parent picker không hiện khối công ty
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/organization.service.ts` — `getOrgFlat()`: thêm `OR [{ companyId }, { id: companyId }]` vào where clause để bao gồm cả node gốc công ty (trước đây chỉ trả về dept/team vì company root có `companyId = null`)
+
+**Kết quả:**
+- Khi chỉnh sửa phòng ban / nhóm, dropdown "Bộ phận quản lý trực tiếp" nay hiển thị cả khối công ty để có thể gán phòng ban trực thuộc công ty
+- Build thành công, `pm2 restart lms-web` → online
+
+**Lưu ý / Rủi ro:**
+- Cache `orgFlat` bị invalidate tự nhiên theo TTL; nếu cần xóa cache ngay có thể restart Redis
+
+## [2026-07-16 11:30] Chỉ báo phòng ban chưa gán vào sơ đồ tổ chức
+
+**Loại:** feature
+
+**Các thay đổi:**
+- `src/app/(dashboard)/organizations/page.tsx`: Thêm cột "Vị trí sơ đồ" vào bảng phòng ban/nhóm — hiển thị badge "Đã gán" (xanh) hoặc "Chưa gán" (vàng) dựa theo `parentId`
+- Thêm summary badge đầu section hiển thị số phòng ban chưa được gán với icon cảnh báo
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Admin dễ dàng nhận biết phòng ban nào chưa được đưa vào sơ đồ tổ chức
+
+**Lưu ý / Rủi ro:**
+- Dùng `parentId === null` làm tiêu chí — phòng ban có `parentId` là company cha cũng được coi là "Đã gán"
+
 ## [2026-07-16 10:00] Tìm kiếm phòng ban trong mục "Bộ phận quản lý trực tiếp"
 
 **Loại:** feature

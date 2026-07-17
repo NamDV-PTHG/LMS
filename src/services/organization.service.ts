@@ -242,7 +242,13 @@ export async function getOrgTree(rootId: string, companyId: string) {
 export async function getOrgFlat(companyId: string): Promise<OrgFlat[]> {
   return cacheAside(CACHE_KEYS.orgFlat(companyId), TTL.ORG_TREE, async () => {
     const orgs = await prisma.organization.findMany({
-      where: { companyId, isActive: true },
+      where: {
+        isActive: true,
+        OR: [
+          { companyId },       // dept/team children của công ty
+          { id: companyId },   // bản thân khối công ty (root node)
+        ],
+      },
       select: { id: true, name: true, code: true, type: true, parentId: true },
       orderBy: { displayOrder: 'asc' },
     });
@@ -346,4 +352,142 @@ export async function getOrgChildren(parentId: string, companyId: string) {
     },
     orderBy: { displayOrder: 'asc' },
   });
+}
+
+// ── Auto-assign org chart ─────────────────────────────────────
+
+export type AutoAssignStatus =
+  | 'assign'           // parentId=null → tìm được cha
+  | 'reassign'         // có cha, sẽ đổi sang cha khác (forceReassign only)
+  | 'no_change'        // có cha, cha mới giống cũ (forceReassign only)
+  | 'keep_current'     // có cha, không tìm được cha mới (forceReassign only)
+  | 'already_assigned' // có cha, bỏ qua (chế độ thường)
+  | 'unresolvable';    // parentId=null, không tìm được cha
+
+export interface AutoAssignItem {
+  id: string;
+  name: string;
+  code: string;
+  currentParentId: string | null;
+  currentParentName: string | null;
+  proposedParentId: string | null;
+  proposedParentName: string | null;
+  proposedParentCode: string | null;
+  status: AutoAssignStatus;
+}
+
+export interface AutoAssignResult {
+  preview: AutoAssignItem[];
+  summary: {
+    willAssign: number;    // assign + reassign
+    noChange: number;      // no_change + already_assigned
+    unresolvable: number;
+    keepCurrent: number;
+  };
+}
+
+/**
+ * Tự động gắn parentId cho các phòng ban dựa trên cấu trúc mã:
+ * "BGD-PC-DES" → thử prefix "BGD-PC" trước, nếu không có → thử "BGD" (walk-up).
+ *
+ * @param companyId  - ID công ty (tenant)
+ * @param preview    - true: chỉ trả kết quả, không ghi DB
+ * @param forceReassign - true: xử lý cả org đã có parentId (dùng khi thêm phòng ban cấp giữa)
+ */
+export async function autoAssignOrgChart(
+  companyId: string,
+  preview: boolean,
+  forceReassign = false,
+): Promise<AutoAssignResult> {
+  // 1. Lấy toàn bộ org trong công ty + company root node
+  const allOrgs = await prisma.organization.findMany({
+    where: {
+      isActive: true,
+      OR: [{ companyId }, { id: companyId }],
+    },
+    select: { id: true, name: true, code: true, type: true, parentId: true },
+  });
+
+  // 2. codeMap (UPPERCASE → org) và idMap (id → org)
+  const codeMap = new Map(allOrgs.map((o) => [o.code.toUpperCase(), o]));
+  const idMap = new Map(allOrgs.map((o) => [o.id, o]));
+
+  // 3. Phân giải cha cho từng dept/team
+  const items: AutoAssignItem[] = [];
+
+  for (const org of allOrgs) {
+    if (org.type === 'company' || org.type === 'group') continue;
+
+    const currentParent = org.parentId ? idMap.get(org.parentId) : undefined;
+
+    // Chế độ thường: bỏ qua org đã có parentId
+    if (!forceReassign && org.parentId !== null) {
+      items.push({
+        id: org.id, name: org.name, code: org.code,
+        currentParentId: org.parentId,
+        currentParentName: currentParent?.name ?? null,
+        proposedParentId: null, proposedParentName: null, proposedParentCode: null,
+        status: 'already_assigned',
+      });
+      continue;
+    }
+
+    // Walk-up prefix search
+    const parts = org.code.toUpperCase().split('-');
+    let parent: typeof allOrgs[0] | undefined;
+    for (let i = parts.length - 1; i >= 1; i--) {
+      const prefix = parts.slice(0, i).join('-');
+      const candidate = codeMap.get(prefix);
+      if (candidate && candidate.id !== org.id) {
+        parent = candidate;
+        break;
+      }
+    }
+
+    let status: AutoAssignStatus;
+    if (!parent) {
+      status = org.parentId !== null ? 'keep_current' : 'unresolvable';
+    } else if (org.parentId === parent.id) {
+      status = 'no_change';
+    } else if (org.parentId !== null) {
+      status = 'reassign';
+    } else {
+      status = 'assign';
+    }
+
+    items.push({
+      id: org.id, name: org.name, code: org.code,
+      currentParentId: org.parentId,
+      currentParentName: currentParent?.name ?? null,
+      proposedParentId: parent?.id ?? null,
+      proposedParentName: parent?.name ?? null,
+      proposedParentCode: parent?.code ?? null,
+      status,
+    });
+  }
+
+  // 4. Thực thi nếu không phải preview
+  if (!preview) {
+    const toWrite = items.filter((i) => i.status === 'assign' || i.status === 'reassign');
+    if (toWrite.length > 0) {
+      await prisma.$transaction(
+        toWrite.map((i) =>
+          prisma.organization.updateMany({
+            where: { id: i.id, parentId: i.currentParentId }, // optimistic-lock guard
+            data: { parentId: i.proposedParentId! },
+          })
+        )
+      );
+      await invalidateOrgCache(companyId);
+    }
+  }
+
+  const summary = {
+    willAssign: items.filter((i) => i.status === 'assign' || i.status === 'reassign').length,
+    noChange: items.filter((i) => i.status === 'no_change' || i.status === 'already_assigned').length,
+    unresolvable: items.filter((i) => i.status === 'unresolvable').length,
+    keepCurrent: items.filter((i) => i.status === 'keep_current').length,
+  };
+
+  return { preview: items, summary };
 }
