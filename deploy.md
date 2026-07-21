@@ -3,6 +3,21 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-21 16:30] Fix AI Course Wizard bước 4 — sinh câu hỏi bị treo
+
+**Loại:** fix
+
+**Nguyên nhân:**
+`step-question-preview.tsx` gọi thẳng `http://localhost:8000/api/questions/generate-from-text` từ browser (FastAPI không chạy) → connection refused → UI treo spinner vô hạn, không có thông báo lỗi
+
+**Các thay đổi:**
+- `src/app/api/wizard/questions/route.ts`: Tạo mới — POST handler gọi VNG LLM để sinh câu hỏi từ text script (reuse cùng prompt logic với ai-document-processor.ts, tối đa 6 chunk)
+- `src/components/wizard/step-question-preview.tsx`: Đổi fetch sang `/api/wizard/questions`, thêm try/catch, hiển thị lỗi inline khi thất bại
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Bước 4 gọi LLM qua Next.js API route thay vì trực tiếp từ browser
+
 ## [2026-07-21 16:00] Fix AI Course Wizard — outline/script gọi thẳng VNG LLM
 
 **Loại:** fix

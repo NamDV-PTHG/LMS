@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import type { CourseOutline, LessonScript } from './step-outline-editor';
+import type { CourseOutline } from './step-outline-editor';
 import type { LessonScript as LessonScriptType } from './step-script-review';
 
 interface GeneratedQuestion {
@@ -24,35 +24,50 @@ interface Props {
 }
 
 export function StepQuestionPreview({ outline, scripts, accessToken, bankId, onNext, onBack }: Props) {
+  void outline; void bankId; // used by parent, not needed here
   const [questions, setQuestions] = useState<GeneratedQuestion[]>([]);
   const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const generateQuestions = async () => {
     setGenerating(true);
+    setGenerateError(null);
+
+    // Collect all script content from step 3
     const allText = Object.values(scripts)
       .filter(Boolean)
       .flatMap((s) => s!.script.map((seg) => seg.content))
       .join('\n\n');
 
-    const res = await fetch(`${process.env.NEXT_PUBLIC_AI_SERVICE_URL ?? 'http://localhost:8000'}/api/questions/generate-from-text`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({
-        text: allText,
-        bank_id: bankId,
-        question_types: ['mcq', 'true_false'],
-        questions_per_chunk: 2,
-        difficulty: 'medium',
-      }),
-    });
+    try {
+      const res = await fetch('/api/wizard/questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          text: allText,
+          questionTypes: ['mcq', 'true_false'],
+          questionsPerChunk: 2,
+          difficulty: 'medium',
+        }),
+      });
 
-    const json = await res.json();
-    if (json.success) {
-      setQuestions(json.data.questions ?? []);
-      setSelected(new Set(json.data.questions.map((_: unknown, i: number) => i)));
+      const json = await res.json() as { success: boolean; data?: { questions: GeneratedQuestion[] }; error?: string };
+      if (json.success && json.data) {
+        const qs = json.data.questions ?? [];
+        setQuestions(qs);
+        setSelected(new Set(qs.map((_, i) => i)));
+        if (qs.length === 0) {
+          setGenerateError('AI không tạo được câu hỏi nào. Hãy thử lại hoặc bỏ qua bước này.');
+        }
+      } else {
+        setGenerateError(json.error ?? 'Không thể tạo câu hỏi. Vui lòng thử lại.');
+      }
+    } catch {
+      setGenerateError('Lỗi kết nối. Vui lòng thử lại.');
+    } finally {
+      setGenerating(false);
     }
-    setGenerating(false);
   };
 
   const toggleSelect = (i: number) => {
@@ -83,6 +98,9 @@ export function StepQuestionPreview({ outline, scripts, accessToken, bankId, onN
                 className="px-6 py-2.5 bg-purple-600 text-white rounded hover:bg-purple-700">
                 🤖 Sinh câu hỏi
               </button>
+              {generateError && (
+                <p className="text-xs text-red-500 max-w-xs mx-auto">{generateError}</p>
+              )}
               <p className="text-xs text-muted-foreground">Hoặc bỏ qua bước này</p>
               <button onClick={() => onNext([])} className="text-sm text-blue-500 hover:underline">Bỏ qua →</button>
             </>
