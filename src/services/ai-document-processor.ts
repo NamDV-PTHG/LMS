@@ -182,13 +182,44 @@ function buildUserPrompt(
   );
 }
 
+/**
+ * Extracts and parses the first complete JSON array from an LLM response.
+ *
+ * Handles:
+ * - <think>...</think> blocks (Qwen3, DeepSeek thinking models)
+ * - Markdown code fences (```json ... ```)
+ * - Trailing text / notes after the array (uses bracket-matching, not lastIndexOf)
+ * - Escaped characters and strings containing [ ] characters
+ */
+function extractJsonArray(text: string): string {
+  const start = text.indexOf('[');
+  if (start === -1) throw new Error('Phản hồi AI không chứa JSON array');
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '[') depth++;
+    else if (ch === ']') { depth--; if (depth === 0) return text.slice(start, i + 1); }
+  }
+
+  throw new Error('Phản hồi AI thiếu ngoặc đóng JSON array');
+}
+
 function parseJsonResponse(text: string): RawQuestion[] {
-  let s = text.trim().replace(/^```(?:json)?/i, '').replace(/```\s*$/, '').trim();
-  const start = s.indexOf('[');
-  const end = s.lastIndexOf(']');
-  if (start === -1 || end === -1) throw new Error('Phản hồi AI không chứa JSON array hợp lệ');
-  s = s.slice(start, end + 1);
-  const parsed = JSON.parse(s) as unknown;
+  // 1. Strip thinking tokens (Qwen3-thinking, DeepSeek R1, etc.)
+  let s = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  // 2. Strip markdown code fences (handles leading whitespace/newlines)
+  s = s.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
+  // 3. Extract the first complete JSON array using bracket-matching
+  const jsonStr = extractJsonArray(s);
+  const parsed = JSON.parse(jsonStr) as unknown;
   if (!Array.isArray(parsed)) throw new Error('Phản hồi AI không phải array');
   return parsed as RawQuestion[];
 }

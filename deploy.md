@@ -3,6 +3,24 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-21 15:00] Fix lỗi parse JSON từ LLM khi dùng model mới
+
+**Loại:** fix
+
+**Nguyên nhân:**
+Parser cũ dùng `lastIndexOf(']')` để tìm cuối JSON array, nhưng nhiều model (gpt-4o-mini, Qwen3...) thêm text giải thích phía sau JSON — VD: `Note: based on [the content above].` — khiến `]` trong câu chữ bị bắt nhầm, sinh lỗi "Unexpected non-whitespace character after JSON at position N".
+Ngoài ra, một số thinking model (Qwen3-thinking, DeepSeek R1) xuất `<think>...</think>` blocks trước JSON → parse thất bại.
+
+**Các thay đổi:**
+- `src/services/ai-document-processor.ts`:
+  - Thêm hàm `extractJsonArray()` dùng bracket-matching (theo dõi depth + string boundaries + escape chars) thay cho `lastIndexOf(']')` → tìm đúng cặp ngoặc dù có text thừa phía sau
+  - Strip `<think>...</think>` blocks trước khi parse (hỗ trợ thinking models)
+  - Sửa regex strip code fence để dùng multiline flag `m` thay vì `^` anchoring
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Hỗ trợ đúng với mọi model: gpt-4o-mini, Qwen3, DeepSeek R1, v.v.
+
 ## [2026-07-16 14:30] Cải thiện thông báo lỗi khi AI service trả về 503
 
 **Loại:** fix
