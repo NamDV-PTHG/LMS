@@ -3,6 +3,23 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-16 14:30] Cải thiện thông báo lỗi khi AI service trả về 503
+
+**Loại:** fix
+
+**Nguyên nhân:**
+Khi LLM API trả về 503 (Service Temporarily Unavailable), lỗi thực tế bị nuốt trong vòng lặp chunk và user chỉ thấy thông báo chung "AI service không trả về câu hỏi hợp lệ." thay vì biết đích danh lỗi gì.
+
+**Các thay đổi:**
+- `src/services/ai-document-processor.ts`: Thu thập lỗi từng chunk vào `chunkErrors[]`, khi tất cả chunk thất bại thì surface lỗi thực tế (VD: "Lỗi từ AI service: LLM API lỗi 503: ...") thay vì thông báo chung
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- User sẽ thấy lỗi cụ thể từ AI service để biết nguyên nhân (503 = service tạm thời không khả dụng)
+
+**Lưu ý:**
+- 503 là lỗi hạ tầng từ VNG Cloud MaaS endpoint. Cần kiểm tra trạng thái dịch vụ và API key tại portal VNG Cloud nếu lỗi tiếp tục
+
 ## [2026-07-21 10:00] Fix lỗi "i is not a function" — downgrade pdf-parse về v1.1.1
 
 **Loại:** fix

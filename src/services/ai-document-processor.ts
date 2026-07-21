@@ -339,6 +339,8 @@ export async function processDocumentWithAI(
       fill_blank: 'fill_blank',
     };
 
+    const chunkErrors: string[] = [];
+
     for (let i = 0; i < processLimit; i++) {
       try {
         const userPrompt = buildUserPrompt(chunks[i], questionTypes, questionsPerChunk, difficulty);
@@ -403,12 +405,19 @@ export async function processDocumentWithAI(
         // Log but continue with remaining chunks
         const msg = chunkErr instanceof Error ? chunkErr.message : String(chunkErr);
         console.error(`[AI Processor] Chunk ${i + 1}/${processLimit} failed: ${msg}`);
+        // Collect unique error causes (truncate to avoid huge messages)
+        const shortMsg = msg.length > 120 ? msg.slice(0, 120) + '…' : msg;
+        if (!chunkErrors.includes(shortMsg)) chunkErrors.push(shortMsg);
       }
     }
 
     if (totalSaved === 0) {
+      // Surface the actual LLM error so the user knows what went wrong
+      const detail = chunkErrors.length > 0
+        ? `Lỗi từ AI service: ${chunkErrors[0]}`
+        : 'AI service không trả về câu hỏi hợp lệ.';
       throw new Error(
-        'AI không tạo được câu hỏi nào từ tài liệu này. Vui lòng kiểm tra model và thử lại.',
+        `AI không tạo được câu hỏi nào từ tài liệu này. ${detail}`,
       );
     }
 
