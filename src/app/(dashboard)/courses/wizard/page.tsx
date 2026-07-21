@@ -32,14 +32,23 @@ export default function CourseWizardPage() {
 
   const generateOutline = async () => {
     setGeneratingOutline(true);
-    const res = await fetch('/api/wizard/outline', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify(courseInfo),
-    });
-    const json = await res.json();
-    if (json.success) setOutline(json.data);
-    setGeneratingOutline(false);
+    try {
+      const res = await fetch('/api/wizard/outline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(courseInfo),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setOutline(json.data);
+      } else {
+        toast('error', json.error ?? 'AI không tạo được outline. Vui lòng thử lại.');
+      }
+    } catch {
+      toast('error', 'Lỗi kết nối khi tạo outline. Vui lòng thử lại.');
+    } finally {
+      setGeneratingOutline(false);
+    }
   };
 
   const handleScriptGenerated = (key: string, script: LessonScript) => {

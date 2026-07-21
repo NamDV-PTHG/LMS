@@ -3,6 +3,23 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-21 16:00] Fix AI Course Wizard — outline/script gọi thẳng VNG LLM
+
+**Loại:** fix
+
+**Nguyên nhân:**
+- `/api/wizard/outline` và `/api/wizard/script` đang gọi FastAPI Python service (`http://localhost:8000`) vốn không còn chạy → connection refused → UI đứng spinner không phản hồi, không có toast lỗi
+- `generateOutline()` trong wizard page không có error handling → lỗi bị nuốt im lặng
+
+**Các thay đổi:**
+- `src/app/api/wizard/outline/route.ts`: Rewrite từ gọi FastAPI → gọi thẳng VNG LLM (giống ai-document-processor.ts). Dùng `extractJsonObject()` với bracket-matching để parse JSON an toàn, hỗ trợ think-blocks và trailing text
+- `src/app/api/wizard/script/route.ts`: Tương tự — rewrite gọi VNG LLM, generate lesson script JSON
+- `src/app/(dashboard)/courses/wizard/page.tsx`: Thêm try/catch + toast error cho `generateOutline()` để người dùng thấy lỗi thay vì spinner biến mất
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Bước 2 wizard sẽ gọi LLM và trả về outline, hoặc hiển thị toast lỗi rõ ràng
+
 ## [2026-07-21 15:00] Fix lỗi parse JSON từ LLM khi dùng model mới
 
 **Loại:** fix
