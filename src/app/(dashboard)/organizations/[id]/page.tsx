@@ -55,9 +55,10 @@ export default function OrgDetailPage() {
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'orgchart'>('info');
 
   const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', address: '', phone: '', description: '', parentId: '' });
+  const [editForm, setEditForm] = useState({ name: '', address: '', phone: '', description: '', parentId: '', type: '' });
   const [saving, setSaving] = useState(false);
   const [parentOptions, setParentOptions] = useState<{ id: string; name: string; code: string; type: string }[]>([]);
+  const [parentOptionsLoading, setParentOptionsLoading] = useState(false);
   const [parentSearch, setParentSearch] = useState('');
   const [parentDropdownOpen, setParentDropdownOpen] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
@@ -100,6 +101,7 @@ export default function OrgDetailPage() {
             phone: res.data.phone ?? '',
             description: res.data.description ?? '',
             parentId: res.data.parentId ?? '',
+            type: res.data.type ?? '',
           });
         } else {
           setError(res.error ?? 'Lỗi tải tổ chức');
@@ -134,6 +136,7 @@ export default function OrgDetailPage() {
 
   const loadParentOptions = () => {
     if (!accessToken) return;
+    setParentOptionsLoading(true);
     fetch(`/api/organizations/${id}/flat`, { headers: { Authorization: `Bearer ${accessToken}` } })
       .then((r) => r.json())
       .then((res) => {
@@ -142,7 +145,8 @@ export default function OrgDetailPage() {
           setParentOptions((res.data ?? []).filter((o: { id: string }) => o.id !== id));
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setParentOptionsLoading(false));
   };
 
   useEffect(() => { loadOrg(); loadUsers(); }, [accessToken, id]); // eslint-disable-line
@@ -158,6 +162,9 @@ export default function OrgDetailPage() {
       };
       if (org?.type === 'dept' || org?.type === 'team') {
         body.parentId = editForm.parentId || null;
+        if (editForm.type && editForm.type !== org.type) {
+          body.type = editForm.type;
+        }
       }
       const res = await fetch(`/api/organizations/${id}`, {
         method: 'PATCH',
@@ -450,100 +457,98 @@ export default function OrgDetailPage() {
                   className={inputClass}
                 />
               </div>
-              <div className="space-y-1.5">
-                <label className="block text-[12px] font-medium text-content">Địa chỉ</label>
-                <input
-                  value={editForm.address}
-                  onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
-                  className={inputClass}
-                  placeholder="123 Đường ABC, TP.HCM"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="block text-[12px] font-medium text-content">Điện thoại</label>
-                <input
-                  value={editForm.phone}
-                  onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                  className={inputClass}
-                  placeholder="028 1234 5678"
-                />
-              </div>
-              {(org.type === 'dept' || org.type === 'team') && parentOptions.length > 0 && (
+
+              {/* Loại phòng ban — chỉ cho dept/team */}
+              {(org.type === 'dept' || org.type === 'team') && (
+                <div className="space-y-1.5">
+                  <label className="block text-[12px] font-medium text-content">Loại phòng ban</label>
+                  <select
+                    value={editForm.type}
+                    onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
+                    className={inputClass}
+                  >
+                    <option value="dept">Phòng ban</option>
+                    <option value="team">Nhóm / Tổ</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Bộ phận quản lý trực tiếp — chỉ cho dept/team */}
+              {(org.type === 'dept' || org.type === 'team') && (
                 <div className="space-y-1.5">
                   <label className="block text-[12px] font-medium text-content">Bộ phận quản lý trực tiếp</label>
-                  {/* Searchable parent picker */}
-                  <div className="relative">
-                    {/* Input hiển thị tên đang chọn + ô tìm kiếm khi mở */}
-                    <button
-                      type="button"
-                      onClick={() => { setParentDropdownOpen((v) => !v); setParentSearch(''); }}
-                      className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-left focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 bg-surface flex items-center justify-between gap-2"
-                    >
-                      <span className={editForm.parentId ? 'text-content' : 'text-faint'}>
-                        {editForm.parentId
-                          ? (() => { const o = parentOptions.find((x) => x.id === editForm.parentId); return o ? `${o.name} (${o.code})` : '—'; })()
-                          : '— Không có (trực thuộc công ty) —'}
-                      </span>
-                      <svg className={`w-3.5 h-3.5 text-faint shrink-0 transition-transform ${parentDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
-                    </button>
+                  {parentOptionsLoading ? (
+                    <div className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-faint flex items-center gap-2">
+                      <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                      Đang tải danh sách...
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => { setParentDropdownOpen((v) => !v); setParentSearch(''); }}
+                        className="w-full border border-default rounded-lg px-3 py-2 text-[12px] text-left focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 bg-surface flex items-center justify-between gap-2"
+                      >
+                        <span className={editForm.parentId ? 'text-content' : 'text-faint'}>
+                          {editForm.parentId
+                            ? (() => { const o = parentOptions.find((x) => x.id === editForm.parentId); return o ? `${o.name} (${o.code})` : '—'; })()
+                            : '— Không có (trực thuộc công ty) —'}
+                        </span>
+                        <svg className={`w-3.5 h-3.5 text-faint shrink-0 transition-transform ${parentDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                      </button>
 
-                    {parentDropdownOpen && (
-                      <div className="absolute z-20 mt-1 w-full bg-surface border border-default rounded-lg shadow-card overflow-hidden">
-                        {/* Search box */}
-                        <div className="p-2 border-b border-default">
-                          <input
-                            autoFocus
-                            type="text"
-                            value={parentSearch}
-                            onChange={(e) => setParentSearch(e.target.value)}
-                            placeholder="Tìm kiếm phòng ban..."
-                            className="w-full border border-default rounded-md px-2.5 py-1.5 text-[12px] text-content placeholder:text-faint focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                          />
+                      {parentDropdownOpen && (
+                        <div className="absolute z-20 mt-1 w-full bg-surface border border-default rounded-lg shadow-card overflow-hidden">
+                          <div className="p-2 border-b border-default">
+                            <input
+                              autoFocus
+                              type="text"
+                              value={parentSearch}
+                              onChange={(e) => setParentSearch(e.target.value)}
+                              placeholder="Tìm kiếm phòng ban..."
+                              className="w-full border border-default rounded-md px-2.5 py-1.5 text-[12px] text-content placeholder:text-faint focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                            />
+                          </div>
+                          <ul className="max-h-52 overflow-y-auto py-1">
+                            <li>
+                              <button
+                                type="button"
+                                onClick={() => { setEditForm({ ...editForm, parentId: '' }); setParentDropdownOpen(false); }}
+                                className={`w-full text-left px-3 py-2 text-[12px] hover:bg-muted transition-colors ${!editForm.parentId ? 'bg-primary-tint text-primary font-medium' : 'text-faint'}`}
+                              >
+                                — Không có (trực thuộc công ty) —
+                              </button>
+                            </li>
+                            {(() => {
+                              const q = parentSearch.trim().toLowerCase();
+                              const filtered = q
+                                ? parentOptions.filter((o) => o.name.toLowerCase().includes(q) || o.code.toLowerCase().includes(q))
+                                : parentOptions;
+                              if (filtered.length === 0) return (
+                                <li className="px-3 py-2 text-[12px] text-faint text-center">Không tìm thấy phòng ban</li>
+                              );
+                              return filtered.map((o) => (
+                                <li key={o.id}>
+                                  <button
+                                    type="button"
+                                    onClick={() => { setEditForm({ ...editForm, parentId: o.id }); setParentDropdownOpen(false); setParentSearch(''); }}
+                                    className={`w-full text-left px-3 py-2 text-[12px] hover:bg-muted transition-colors ${editForm.parentId === o.id ? 'bg-primary-tint text-primary font-medium' : 'text-content'}`}
+                                  >
+                                    <span className="font-medium">{o.name}</span>
+                                    <span className="ml-1.5 text-faint text-[11px]">({o.code})</span>
+                                  </button>
+                                </li>
+                              ));
+                            })()}
+                          </ul>
                         </div>
+                      )}
 
-                        {/* Options list */}
-                        <ul className="max-h-52 overflow-y-auto py-1">
-                          {/* Tuỳ chọn "không có" */}
-                          <li>
-                            <button
-                              type="button"
-                              onClick={() => { setEditForm({ ...editForm, parentId: '' }); setParentDropdownOpen(false); }}
-                              className={`w-full text-left px-3 py-2 text-[12px] hover:bg-muted transition-colors ${!editForm.parentId ? 'bg-primary-tint text-primary font-medium' : 'text-faint'}`}
-                            >
-                              — Không có (trực thuộc công ty) —
-                            </button>
-                          </li>
-
-                          {(() => {
-                            const q = parentSearch.trim().toLowerCase();
-                            const filtered = q
-                              ? parentOptions.filter((o) => o.name.toLowerCase().includes(q) || o.code.toLowerCase().includes(q))
-                              : parentOptions;
-                            if (filtered.length === 0) return (
-                              <li className="px-3 py-2 text-[12px] text-faint text-center">Không tìm thấy phòng ban</li>
-                            );
-                            return filtered.map((o) => (
-                              <li key={o.id}>
-                                <button
-                                  type="button"
-                                  onClick={() => { setEditForm({ ...editForm, parentId: o.id }); setParentDropdownOpen(false); setParentSearch(''); }}
-                                  className={`w-full text-left px-3 py-2 text-[12px] hover:bg-muted transition-colors ${editForm.parentId === o.id ? 'bg-primary-tint text-primary font-medium' : 'text-content'}`}
-                                >
-                                  <span className="font-medium">{o.name}</span>
-                                  <span className="ml-1.5 text-faint text-[11px]">({o.code})</span>
-                                </button>
-                              </li>
-                            ));
-                          })()}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Click-outside overlay */}
-                    {parentDropdownOpen && (
-                      <div className="fixed inset-0 z-10" onClick={() => { setParentDropdownOpen(false); setParentSearch(''); }} />
-                    )}
-                  </div>
+                      {parentDropdownOpen && (
+                        <div className="fixed inset-0 z-10" onClick={() => { setParentDropdownOpen(false); setParentSearch(''); }} />
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               <div className="space-y-1.5">

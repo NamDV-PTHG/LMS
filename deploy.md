@@ -3,6 +3,69 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-21 16:50] Fix: Video không hiển thị sau lần fix trước (regression) + deploy production
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/components/lesson/VideoPlayer.tsx`: Viết lại lần 2 với kiến trúc 4-effect đúng:
+  - **Effect A** (reset state): chạy khi `assetId` đổi → xóa `streamData`, reset anti-fraud refs
+  - **Effect B** (fetch stream-url): chạy khi `assetId` hoặc `accessToken` đổi → fetch URL mới
+  - **Effect C** (player init / source swap): có `streamData` trong deps nên chạy đúng khi streamData về; nếu player chưa tồn tại → tạo mới; nếu đã có → chỉ swap source (JWT refresh); **KHÔNG return cleanup** → không bao giờ dispose player ở đây
+  - **Effect D** (cleanup duy nhất): deps `[assetId, allowFreeSeeking, requiredWatchPct, maxPlaybackRate]` không có `accessToken`/`streamData` → chỉ dispose khi chuyển bài học hoặc unmount
+
+**Vấn đề của fix trước (Attempt 1):** Effect init player bị bỏ `streamData` khỏi deps → chạy khi `videoRef.current = null` (đang loading) → không tạo được player → video không hiển thị.
+
+**Kết quả:**
+- Video hiển thị bình thường (fix regression)
+- Video không reset khi JWT refresh sau ~15 phút
+- Build thành công local + production (10.191.36.72), pm2 lms-web online
+
+**Lưu ý / Rủi ro:**
+- Đã deploy `D:\LMS PTHG` trên production server 10.191.36.72
+
+---
+
+## [2026-07-21] Fix: Video tự reset về đầu khi xem gần cuối (JWT token refresh)
+
+**Loại:** fix
+
+**Nguyên nhân gốc rễ:**
+JWT token hết hạn sau 15 phút (`JWT_EXPIRES_IN="15m"`). Video "Kỹ năng xây dựng prompt nâng cao" dài ~15 phút → token hết hạn đúng khi học viên đang xem gần cuối (frame video quay lại cho thấy còn -1:36 thì reset). Khi `accessToken` thay đổi:
+1. Effect fetch stream-url re-run → `streamData` mới
+2. Effect init player (có `streamData` trong deps) cleanup chạy → `player.dispose()`
+3. Player bị destroy, video reset về thumbnail/đầu
+4. Học viên mất tiến độ, bài học không được đánh dấu hoàn thành
+
+**Các thay đổi:**
+- `src/components/lesson/VideoPlayer.tsx`: Tách thành 3 effects riêng biệt:
+  - **Effect 1** (fetch stream-url): giữ nguyên, chạy khi `assetId` hoặc `accessToken` thay đổi
+  - **Effect 2** (source swap): chạy khi `streamData` thay đổi, **KHÔNG có cleanup** → không bao giờ dispose player; chỉ gọi `p.src()` + `p.load()` + restore vị trí qua `forcedSeekRef`
+  - **Effect 3** (player init): deps chỉ có `[assetId, allowFreeSeeking, requiredWatchPct, maxPlaybackRate]`, **KHÔNG có `streamData` hay `accessToken`** → không bị trigger khi JWT refresh; cleanup chỉ chạy khi component unmount hoặc assetId thay đổi
+- Thêm `accessTokenRef`, `enrollmentIdRef` để tracking dùng token mới nhất mà không cần player re-init
+- Thêm `forcedSeekRef` (ref thay vì local var) để seeking handler nhận biết system seek vs user seek khi restore vị trí sau source swap
+
+**Kết quả:**
+- Video không còn reset khi JWT refresh (~15 phút xem)
+- Học viên xem xong video dài >15 phút sẽ nhận thông báo hoàn thành
+- Anti-fraud (chặn tua) vẫn hoạt động đúng
+- Build thành công, pm2 lms-web online
+
+## [2026-07-21 17:00] Fix form chỉnh sửa phòng ban thiếu trường type và parent
+
+**Loại:** fix
+
+**Nguyên nhân:**
+1. `editForm` không có trường `type` → form không hiển thị "Loại phòng ban"
+2. Dropdown "Bộ phận quản lý trực tiếp" ẩn vì `parentOptions.length > 0` luôn false: `/api/organizations/${id}/flat` truyền dept ID làm companyId vào `getOrgFlat` → query `{ companyId: deptId }` → trả về rỗng
+
+**Các thay đổi:**
+- `src/app/api/organizations/[id]/flat/route.ts`: Lookup org để resolve companyId thực sự trước khi gọi `getOrgFlat`
+- `src/app/(dashboard)/organizations/[id]/page.tsx`: Thêm trường `type` vào editForm; select loại phòng ban (dept/team); loading spinner khi tải parent options; bỏ điều kiện `parentOptions.length > 0`
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+
 ## [2026-07-21 16:30] Fix AI Course Wizard bước 4 — sinh câu hỏi bị treo
 
 **Loại:** fix
