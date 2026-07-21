@@ -3,6 +3,205 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-21 09:00] Fix lỗi "i is not a function" khi tạo câu hỏi AI từ PDF
+
+**Loại:** fix
+
+**Nguyên nhân:**
+`pdf-parse` (và `mammoth`, `jszip`) không có trong `serverComponentsExternalPackages`. Next.js bundle các package này nhưng externalize `pdfjs-dist` (dependency của `pdf-parse`) → mismatch khiến internal function bị minify thành `i` và mất reference tại runtime → lỗi `"Không đọc được nội dung file: i is not a function"`.
+
+**Các thay đổi:**
+- `next.config.js`: Thêm `pdf-parse`, `mammoth`, `jszip` vào `serverComponentsExternalPackages`
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- PDF có cả hình ảnh và text được xử lý đúng
+
+---
+
+## [2026-07-17] Fix: Hiển thị thông báo hoàn thành bài học video trong dashboard
+
+**Loại:** fix
+
+**Vấn đề:**
+- Dashboard lesson player (`my-courses/[id]/lessons/[lessonId]/page.tsx`) không hiển thị toast khi học viên hoàn thành video
+- Lỗi API bị bắt im lặng (silent catch) — học viên không biết có lỗi xảy ra
+- `VideoPlayer.tsx`: nếu `player.duration()` trả về `Infinity` (một số HLS stream), `watchedPct = 0%` → cảnh báo gian lận thay vì hoàn thành
+
+**Các thay đổi:**
+- `src/app/(dashboard)/my-courses/[id]/lessons/[lessonId]/page.tsx`: thêm `toast('success', 'Đã hoàn thành bài học!')` sau khi lưu tiến độ thành công; thêm `toast('error', ...)` trong catch và khi API trả lỗi; kiểm tra `res.success` trước khi `setCompleted(true)`
+- `src/components/lesson/VideoPlayer.tsx`: thêm `isFinite(duration)` check trong `ended` event handler — nếu duration là `Infinity` thì bỏ qua kiểm tra % và gọi `onCompleteRef.current?.()` trực tiếp
+
+**Kết quả:**
+- Học viên nhận toast xanh "Đã hoàn thành bài học!" khi video kết thúc và API thành công
+- Lỗi kết nối/API hiển thị toast đỏ thay vì im lặng
+- HLS stream với `duration=Infinity` không còn bị kẹt ở cảnh báo gian lận
+- Build thành công, pm2 lms-web online
+
+**Lưu ý / Rủi ro:**
+- PWA version (`app/courses/`) đã có toast trước đó — chỉ dashboard được fix
+
+## [2026-07-18] Fix: Đọc PDF/PPTX có nhiều hình ảnh cho AI question generation và wizard
+
+**Loại:** fix
+
+**Vấn đề:**
+- PDF chỉ chứa hình ảnh (slide scan, infographic) → pdf-parse trả về < 200 ký tự → hệ thống báo lỗi "không đọc được"
+- PPTX có slide toàn hình ảnh/biểu đồ → chỉ lấy text box, bỏ qua toàn bộ ảnh
+- Wizard extract-text không hỗ trợ file PPTX
+
+**Các thay đổi:**
+- `src/lib/ocr-utils.ts` *(mới)*: Shared OCR utilities — `renderPdfPages()` (pdfjs-dist + @napi-rs/canvas) và `ocrImages()` (tesseract.js vie+eng)
+- `src/services/ai-document-processor.ts`: PDF → OCR fallback khi text < 200 chars; PPTX → extract ảnh từ `ppt/media/` và OCR khi text < 300 chars
+- `src/app/api/wizard/extract-text/route.ts`: Thêm PPTX support (text + image OCR); refactor dùng shared OCR utils thay vì code cục bộ
+- `ai-service/services/document_parser.py`: PDF → OCR từng trang khi < 50 chars; PPTX → OCR Picture shapes; graceful fallback nếu Tesseract chưa cài
+- `ai-service/requirements.txt`: Thêm `pytesseract>=0.3.10` và `Pillow>=10.0.0`
+
+**Kết quả:**
+- pytesseract + Pillow đã cài thành công
+- Build Next.js OK, pm2 online
+- Lưu ý: Tesseract binary cần được cài trên Windows Server để Python OCR hoạt động: https://github.com/UB-Mannheim/tesseract/wiki
+- Node.js OCR (tesseract.js) hoạt động độc lập, không cần Tesseract binary
+
+**Lưu ý / Rủi ro:**
+- OCR làm tăng thời gian xử lý (mỗi trang ~2-5s). File PDF 25 trang image có thể mất 1-2 phút.
+- Giới hạn: tối đa 25 trang PDF / 25 ảnh PPTX để tránh timeout
+- Nếu file PDF hybrid (vừa text vừa ảnh), chỉ các trang thiếu text mới được OCR (tiết kiệm thời gian)
+
+## [2026-07-17] Fix: Đường kết nối công ty → phòng ban trong sơ đồ tổ chức
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/components/org-chart/OrgChartViewer.tsx`: Thay edge type từ `straight` (tạo đường xiên) sang `step` (tạo đường vuông góc thẳng đứng→ngang→thẳng đứng) cho các cạnh nối từ node `company`/`group` xuống con trực tiếp. Các cạnh còn lại vẫn dùng `smoothstep`.
+
+**Kết quả:**
+- Đường kết nối từ "Công ty" xuống "Ban Giám Đốc" không còn bị xiên/chéo
+- Hiển thị dạng đường vuông góc (L-shape) — kiểu connector chuẩn cho sơ đồ tổ chức
+- Build OK, pm2 restart online
+
+**Lưu ý / Rủi ro:**
+- Nếu Công ty có nhiều dept trực tiếp, đường kết nối từ Company sẽ tạo L-shape đến từng dept — đây là hành vi đúng của org chart
+
+## [2026-07-18 08:30] Fix: Video không xác nhận hoàn thành + học viên bị thoát khỏi video
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/(pwa)/app/courses/[courseId]/lessons/[lessonId]/page.tsx`:
+  - Xóa `urlKey` state + `renewTimer` useEffect: mỗi 15 phút `urlKey` tăng → `key` prop thay đổi → VideoPlayer bị unmount/remount hoàn toàn → video reset về đầu → học viên "bị thoát"
+  - Thay `key={`player-${urlKey}`}` bằng `key={lesson.assetId}` (stable key)
+- `src/components/lesson/VideoPlayer.tsx`:
+  - Thêm `onCompleteRef` — giữ latest `onComplete` qua ref thay vì để trong dep array. Trước đây `handleVideoComplete` thay đổi identity mỗi khi `completing` state hoặc `lesson` thay đổi → `onComplete` prop thay đổi → player effect cleanup → `player.dispose()` giữa lúc đang xử lý ended → không gọi được toast "Hoàn thành"
+  - Xóa `onComplete` khỏi dep array của init effect
+  - Thêm in-place URL refresh: khi `streamData` thay đổi trên player đang tồn tại → cập nhật source tại chỗ (giữ `currentTime`, `paused` state) thay vì dispose + tạo lại
+
+**Nguyên nhân gốc:**
+- `urlKey` timer 15 phút → remount VideoPlayer → `maxWatched` reset về 0. Video dài 20 phút, học viên xem được 18 phút, bị remount → xem tiếp 2 phút → khi video kết thúc `watchedPct = 2/20 = 10% < 90%` → `onComplete` không được gọi → không có toast hoàn thành
+- `onComplete` trong dep array → player bị dispose ngay sau khi `ended` fire → race condition
+
+**Kết quả:**
+- Build thành công (exit 0), `pm2 restart lms-web` → online
+- Chunk xác nhận: `urlKey` không còn trong page.js; `loadedmetadata` có trong VideoPlayer chunk (in-place refresh)
+- Học viên không bị thoát video; video kết thúc tự nhiên → toast "Hoàn thành bài học!" hiện đúng
+
+## [2026-07-17 14:30] Fix: Quiz chấm điểm sai + options hiển thị lộn xộn (production rebuild)
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/quiz.service.ts` — `startQuiz()`: snapshot `correctAnswers` lưu label (A/B/C/D) thay vì UUID của option. Build cũ (3:00 AM) đã bị thay file source nhưng chưa build lại → fix chưa có hiệu lực.
+- `src/app/(pwa)/app/courses/[courseId]/quiz/[quizId]/page.tsx` — Sort options A→D trước khi render (`.sort((a,b) => a.key.localeCompare(b.key))`).
+- `src/app/api/lessons/[lessonId]/regrade/route.ts` — API regrade mới; resolve UUID → label khi chấm lại.
+- Rebuild toàn bộ project (`npm run build` exit 0) + `pm2 restart lms-web` → chunk `3850.js` đã chứa fix.
+
+**Nguyên nhân gốc:**
+- Build lúc 3:00 AM chạy TRƯỚC khi upload file fix qua SFTP → compiled chunk vẫn dùng code cũ lưu UUID thay vì label → mọi attempt mới tiếp tục chấm điểm sai.
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Chunk `3850.js` xác nhận có code mới: `(t?.options??[]).find(t=>t.id===e.correctAnswer); I[e.id]=i?.label??i?.key??e.correctAnswer`
+- Regrade 4 attempt bị ảnh hưởng: `fa90acb0` (nam.dv@phuthaiholdings) 0/16 → **13/16 PASSED**
+- Attempt mới từ giờ sẽ snapshot đúng label, grading chính xác
+
+**Lưu ý:**
+- 3 attempt khác (`58f63c5a`, `50fe212b`, `d5eb6bfc`) vẫn 0/16 do học viên không submit đáp án (submitted={}), không phải lỗi snapshot
+
+## [2026-07-17 13:00] Fix: Sơ đồ tổ chức trống khi xem từ công ty + đường nối gấp khúc
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/api/organizations/[id]/flat/route.ts` — Bug: route dùng `companyId` từ middleware JWT thay vì `params.id` từ URL. group_admin xem bất kỳ công ty nào đều nhận dữ liệu của chính họ (trống). Fix: dùng `params.id` làm orgId; thêm tenant guard: non-group-role chỉ được xem orgId trùng với companyId của họ.
+- `src/components/org-chart/OrgChartViewer.tsx` — Đổi edge type từ `'smoothstep'` sang `'default'` (bezier curve). `smoothstep` tạo đường vuông góc gấp khúc khi hai node lệch nhau theo chiều ngang; `default` tạo đường cong mượt tự nhiên hơn.
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- group_admin bấm vào công ty → sơ đồ hiển thị đầy đủ
+- Đường nối giữa các node trở thành bezier curve thay vì gấp khúc
+
+## [2026-07-17 12:30] Fix: Import vị trí công việc — code tùy chọn, warning khi skip row
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/import.service.ts` — `importJobPositions`: bỏ điều kiện bắt buộc `row.code`; nếu không điền `code` thì tự sinh slug từ `title`. Thêm warning rõ ràng khi row bị skip do thiếu `title`. Chuẩn hóa các field bằng `String(...).trim()`.
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Import row không có `code` sẽ tự sinh mã thay vì bị bỏ qua silently
+
+**Lưu ý:** Cần import lại file — dữ liệu từ lần import trước không được tạo
+
+## [2026-07-17 12:10] Fix hiển thị options lộn xộn + regrade attempt bị lỗi
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/app/(pwa)/app/courses/[courseId]/quiz/[quizId]/page.tsx` (remote) — sort options A→D trước khi render thay vì render theo thứ tự shuffle từ server. `shuffleOptions=true` khiến options hiển thị lộn xộn (D, B, A, C)
+- DB — regrade attempt `0157d6b3` của `nam.dv@phuthaiholdings`: bắt đầu TRƯỚC khi deploy fix UUID→label nên snapshot lưu UUID → chấm 0/16. Sau regrade: **13/16 (81.3%) — passed**
+
+**Kết quả:**
+- Build exit code 0, PM2 online
+- Options từ nay hiển thị đúng thứ tự A, B, C, D
+- Attempt của nam.dv: 0/16 → 13/16 (passed)
+
+## [2026-07-17 12:00] Fix: Import vị trí công việc báo thành công nhưng không có dữ liệu
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/import.service.ts` — Sửa hàm `parseExcel`: template Excel sinh header `'code *'`, `'title *'`, `'email *'`... (dấu `*` đánh dấu bắt buộc). XLSX.js parse thành JSON key `'code *'` thay vì `'code'` → `row.code = undefined` → mọi row bị skip → `successRows = 0` nhưng vẫn báo SUCCESS. Fix: strip trailing `' *'` khỏi key sau khi parse.
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- Import job_positions và users đọc đúng dữ liệu từ file template
+
+**Lưu ý / Rủi ro:**
+- Dữ liệu từ lần import trước bị silent-skip → cần import lại bằng file gốc
+- Bug ảnh hưởng cả Users (`email *`, `fullName *`, `role *`) và JobPositions (`code *`, `title *`)
+- OrgChart không bị ảnh hưởng vì header không có `*`
+
+## [2026-07-17 11:30] Fix chấm điểm quiz sai — UUID vs label mismatch
+
+**Loại:** fix
+
+**Các thay đổi:**
+- `src/services/quiz.service.ts` — sửa `startQuiz`: khi tạo snapshot `correctAnswers`, resolve UUID của option sang label (A/B/C/D) thay vì lưu UUID thô. DB lưu `correctAnswer` dạng UUID (option ID), nhưng học viên submit dạng label → so sánh luôn sai → điểm = 0
+- `src/app/api/lessons/[lessonId]/regrade/route.ts` — sửa tương tự trong grading loop và phần lưu `correctAnswers` sau regrade; cũng fetch thêm `options` để resolve UUID → label
+
+**Nguyên nhân gốc:**
+Quiz "Bài tập ứng dụng prompt cơ bản" bị chấm sai 100% — học viên trả lời đúng (ví dụ "B") nhưng hệ thống so sánh "B" với UUID `8dde3d14-01b3-4a71-888a-6838e8efe6cb` → `isCorrect = false`. Toàn bộ 14 attempt đều có `score = 0`.
+
+**Kết quả:**
+- Build exit code 0, PM2 restart thành công, lms-web online
+- Các attempt MỚI sẽ được chấm đúng
+- Các attempt CŨ (đã nộp) cần regrade qua API `POST /api/lessons/afd47592-0d93-4848-860c-2903112bfb6a/regrade`
+
+**Lưu ý / Rủi ro:**
+- 14 attempt đã nộp của quiz này đều bị điểm 0 sai — cần chạy regrade
+- Bất kỳ quiz nào có options định dạng `{id, label, content}` đều bị ảnh hưởng bởi bug này
+
 ## [2026-07-17 10:30] Fix: Chấm điểm quiz sai sau khi cập nhật đáp án
 
 **Loại:** fix
