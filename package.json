@@ -57,7 +57,7 @@
     "next-auth": "^4.24.11",
     "node-cron": "^3.0.3",
     "nodemailer": "^7.0.13",
-    "pdf-parse": "^2.4.5",
+    "pdf-parse": "^1.1.1",
     "pdfjs-dist": "^5.6.205",
     "pdfkit": "^0.15.2",
     "react": "^18",

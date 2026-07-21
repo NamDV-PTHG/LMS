@@ -9,14 +9,36 @@
 
 import { prisma } from '@/lib/prisma';
 import { markImportJobFailed } from './question-bank.service';
+import { renderPdfPages, ocrImages } from '@/lib/ocr-utils';
 
 // ── Document parsing ────────────────────────────────────────────
 
 async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+  // Step 1: fast text extraction via pdf-parse
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>;
   const result = await pdfParse(buffer);
-  return result.text;
+  let text = result.text;
+
+  // Step 2: if the PDF is mostly images (scanned slides, image-only PDFs),
+  // pdf-parse returns very little text → fall back to render-each-page + Tesseract OCR.
+  const nonWhitespace = text.replace(/\s/g, '').length;
+  if (nonWhitespace < 200) {
+    console.log('[AI Processor] PDF has little selectable text, trying OCR fallback…');
+    try {
+      const pages = await renderPdfPages(buffer, 25);
+      if (pages.length > 0) {
+        const ocrText = await ocrImages(pages);
+        if (ocrText.replace(/\s/g, '').length > nonWhitespace) {
+          text = ocrText;
+        }
+      }
+    } catch (ocrErr) {
+      console.warn('[AI Processor] PDF OCR fallback failed:', ocrErr);
+    }
+  }
+
+  return text;
 }
 
 async function extractTextFromDocx(buffer: Buffer): Promise<string> {
@@ -26,23 +48,55 @@ async function extractTextFromDocx(buffer: Buffer): Promise<string> {
   return result.value;
 }
 
+const PPTX_IMAGE_EXT = /\.(png|jpg|jpeg|gif|bmp|tiff|webp)$/i;
+
 async function extractTextFromPptx(buffer: Buffer): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const JSZip = require('jszip') as { loadAsync: (buf: Buffer) => Promise<{ files: Record<string, { async: (t: 'text') => Promise<string> }> }> };
+  const JSZip = require('jszip') as {
+    loadAsync: (buf: Buffer) => Promise<{
+      files: Record<string, { async: (t: 'text' | 'arraybuffer') => Promise<string | ArrayBuffer> }>;
+    }>;
+  };
   const zip = await JSZip.loadAsync(buffer);
-  const texts: string[] = [];
+  const slideTexts: string[] = [];
+  const mediaImages: Buffer[] = [];
 
-  for (const [path, file] of Object.entries(zip.files)) {
-    if (/ppt\/slides\/slide\d+\.xml/.test(path)) {
-      const xml = await file.async('text');
-      // Extract text nodes <a:t>...</a:t>
+  for (const [filePath, file] of Object.entries(zip.files)) {
+    // Extract text from slide XML
+    if (/ppt\/slides\/slide\d+\.xml/.test(filePath)) {
+      const xml = await file.async('text') as string;
       const matches = Array.from(xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g));
       const slideText = matches.map((m) => m[1]).join(' ').trim();
-      if (slideText.length > 10) texts.push(slideText);
+      if (slideText.length > 10) slideTexts.push(slideText);
+    }
+
+    // Collect embedded images from ppt/media/ for OCR fallback
+    if (/^ppt\/media\//.test(filePath) && PPTX_IMAGE_EXT.test(filePath)) {
+      const ab = await file.async('arraybuffer') as ArrayBuffer;
+      mediaImages.push(Buffer.from(ab));
     }
   }
 
-  return texts.join('\n\n');
+  const textContent = slideTexts.join('\n\n');
+  const nonWhitespace = textContent.replace(/\s/g, '').length;
+
+  // If the slides had very little text but contain embedded images,
+  // the presentation is likely built from graphics/diagrams → OCR every image.
+  if (nonWhitespace < 300 && mediaImages.length > 0) {
+    console.log(
+      `[AI Processor] PPTX has little text (${nonWhitespace} chars) but ${mediaImages.length} images — running OCR…`,
+    );
+    try {
+      const ocrText = await ocrImages(mediaImages.slice(0, 25));
+      if (ocrText.trim()) {
+        return textContent + (textContent ? '\n\n' : '') + ocrText;
+      }
+    } catch (ocrErr) {
+      console.warn('[AI Processor] PPTX image OCR failed:', ocrErr);
+    }
+  }
+
+  return textContent;
 }
 
 export async function extractText(buffer: Buffer, mimeType: string): Promise<string> {

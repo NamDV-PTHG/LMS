@@ -3,6 +3,26 @@
 > Ghi lại mọi thay đổi theo thứ tự mới nhất lên đầu.
 > Format: ngày giờ · loại · files · kết quả · lưu ý
 
+## [2026-07-21 10:00] Fix lỗi "i is not a function" — downgrade pdf-parse về v1.1.1
+
+**Loại:** fix
+
+**Nguyên nhân thực sự (sau điều tra log):**
+`pdf-parse` đã được nâng cấp lên **v2.4.5** với breaking API change — không còn là callable function mà export ra object chứa class `PDFParse`. Code cũ `pdfParse(buffer)` gọi object như function → minified thành `i()` → `TypeError: i is not a function`.
+
+Thử dùng `pdfjs-dist` v5.x trực tiếp cũng không khả thi vì build mới yêu cầu DOM API (`DOMMatrix`) không có trong Node.js.
+
+**Giải pháp:**
+- `npm install pdf-parse@1.1.1` — phiên bản ổn định, API là function, tương thích hoàn toàn với code hiện có
+
+**Các thay đổi:**
+- `package.json` + `package-lock.json`: `pdf-parse` downgrade từ 2.4.5 → 1.1.1
+- `src/services/ai-document-processor.ts`: xóa debug log tạm
+
+**Kết quả:**
+- Build thành công, `pm2 restart lms-web` → online
+- PDF có cả hình ảnh và text được xử lý đúng
+
 ## [2026-07-21 09:00] Fix lỗi "i is not a function" khi tạo câu hỏi AI từ PDF
 
 **Loại:** fix
