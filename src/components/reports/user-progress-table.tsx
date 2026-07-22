@@ -13,10 +13,10 @@ interface Row {
 }
 
 const STATUS_LABELS: Record<string, { label: string; className: string }> = {
-  completed:            { label: 'Hoàn thành',   className: 'bg-green-100 text-green-700' },
-  in_progress:          { label: 'Đang học',      className: 'bg-blue-100 text-blue-700' },
-  overdue:              { label: 'Trễ hạn',       className: 'bg-red-100 text-red-700' },
-  not_started:          { label: 'Chưa bắt đầu', className: 'bg-gray-100 text-gray-600' },
+  completed:            { label: 'Hoàn thành',     className: 'bg-green-100 text-green-700' },
+  in_progress:          { label: 'Đang học',        className: 'bg-blue-100 text-blue-700' },
+  overdue:              { label: 'Trễ hạn',         className: 'bg-red-100 text-red-700' },
+  not_started:          { label: 'Chưa bắt đầu',   className: 'bg-gray-100 text-gray-600' },
   overdue_not_started:  { label: 'Chưa học - trễ', className: 'bg-red-100 text-red-800' },
 };
 
@@ -30,74 +30,76 @@ export function UserProgressTable({
   columns = ['user', 'course', 'progress', 'completed', 'deadline', 'status'],
 }: UserProgressTableProps) {
   if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground py-4 text-center">Không có dữ liệu</p>;
+    return (
+      <p className="text-[12px] text-faint py-8 text-center">Không có dữ liệu</p>
+    );
   }
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="w-full text-[12px]">
         <thead>
-          <tr className="border-b text-left text-xs text-muted-foreground">
-            {columns.includes('user')      && <th className="pb-2 pr-4 font-medium">Học viên</th>}
-            {columns.includes('course')    && <th className="pb-2 pr-4 font-medium">Khóa học</th>}
-            {columns.includes('progress')  && <th className="pb-2 pr-4 font-medium text-right">Tiến độ</th>}
-            {columns.includes('time')      && <th className="pb-2 pr-4 font-medium text-right">Thời gian</th>}
-            {columns.includes('completed') && <th className="pb-2 pr-4 font-medium">Hoàn thành</th>}
-            {columns.includes('deadline')  && <th className="pb-2 pr-4 font-medium">Hạn chót</th>}
-            {columns.includes('status')    && <th className="pb-2 font-medium">Trạng thái</th>}
+          <tr className="bg-muted border-b border-default text-left">
+            {columns.includes('user')      && <th className="px-4 py-2.5 text-subtle font-medium">Học viên</th>}
+            {columns.includes('course')    && <th className="px-4 py-2.5 text-subtle font-medium">Khóa học</th>}
+            {columns.includes('progress')  && <th className="px-4 py-2.5 text-subtle font-medium text-right">Tiến độ</th>}
+            {columns.includes('time')      && <th className="px-4 py-2.5 text-subtle font-medium text-right">Thời gian</th>}
+            {columns.includes('completed') && <th className="px-4 py-2.5 text-subtle font-medium">Hoàn thành</th>}
+            {columns.includes('deadline')  && <th className="px-4 py-2.5 text-subtle font-medium">Hạn chót</th>}
+            {columns.includes('status')    && <th className="px-4 py-2.5 text-subtle font-medium">Trạng thái</th>}
           </tr>
         </thead>
-        <tbody className="divide-y">
+        <tbody className="divide-y divide-default">
           {rows.map((r, i) => (
-            <tr key={i} className="hover:bg-gray-50">
+            <tr key={i} className="hover:bg-muted/40 transition-colors">
               {columns.includes('user') && (
-                <td className="py-2 pr-4">
-                  <p className="font-medium text-gray-900">{r.userName}</p>
-                  {r.userEmail && <p className="text-xs text-muted-foreground">{r.userEmail}</p>}
+                <td className="px-4 py-2.5">
+                  <p className="font-medium text-content">{r.userName}</p>
+                  {r.userEmail && <p className="text-[11px] text-subtle mt-0.5">{r.userEmail}</p>}
                 </td>
               )}
               {columns.includes('course') && (
-                <td className="py-2 pr-4 max-w-[200px]">
-                  <p className="truncate">{r.courseTitle ?? '—'}</p>
+                <td className="px-4 py-2.5 max-w-[200px]">
+                  <p className="truncate text-content">{r.courseTitle ?? '—'}</p>
                 </td>
               )}
               {columns.includes('progress') && (
-                <td className="py-2 pr-4 text-right">
+                <td className="px-4 py-2.5 text-right">
                   {r.progressPct !== undefined ? (
                     <div className="flex items-center justify-end gap-2">
-                      <div className="w-16 bg-gray-200 rounded-full h-1.5">
+                      <div className="w-16 bg-gray-100 rounded-full h-1.5">
                         <div
-                          className="bg-blue-500 h-1.5 rounded-full"
+                          className="bg-primary h-1.5 rounded-full"
                           style={{ width: `${r.progressPct}%` }}
                         />
                       </div>
-                      <span className="text-xs w-8">{Math.round(r.progressPct)}%</span>
+                      <span className="text-[11px] text-subtle w-8">{Math.round(r.progressPct)}%</span>
                     </div>
-                  ) : '—'}
+                  ) : <span className="text-faint">—</span>}
                 </td>
               )}
               {columns.includes('time') && (
-                <td className="py-2 pr-4 text-right text-xs">
+                <td className="px-4 py-2.5 text-right text-subtle">
                   {r.timeSpentHours !== undefined ? `${r.timeSpentHours}h` : '—'}
                 </td>
               )}
               {columns.includes('completed') && (
-                <td className="py-2 pr-4 text-xs">
-                  {r.completedAt ? new Date(r.completedAt).toLocaleDateString('vi-VN') : '—'}
+                <td className="px-4 py-2.5 text-subtle">
+                  {r.completedAt ? new Date(r.completedAt).toLocaleDateString('vi-VN') : <span className="text-faint">—</span>}
                 </td>
               )}
               {columns.includes('deadline') && (
-                <td className="py-2 pr-4 text-xs">
-                  {r.deadline ? new Date(r.deadline).toLocaleDateString('vi-VN') : '—'}
+                <td className="px-4 py-2.5 text-subtle">
+                  {r.deadline ? new Date(r.deadline).toLocaleDateString('vi-VN') : <span className="text-faint">—</span>}
                 </td>
               )}
               {columns.includes('status') && (
-                <td className="py-2">
+                <td className="px-4 py-2.5">
                   {r.status ? (
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_LABELS[r.status]?.className ?? 'bg-gray-100 text-gray-700'}`}>
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${STATUS_LABELS[r.status]?.className ?? 'bg-gray-100 text-gray-700'}`}>
                       {STATUS_LABELS[r.status]?.label ?? r.status}
                     </span>
-                  ) : '—'}
+                  ) : <span className="text-faint">—</span>}
                 </td>
               )}
             </tr>

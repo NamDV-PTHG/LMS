@@ -54,14 +54,13 @@ interface RatingReport {
   bottomRated: { courseId: string; courseTitle: string; avgRating: number; ratingCount: number }[];
 }
 
-// Hiển thị sao đánh giá
 function StarRating({ value }: { value: number }) {
   return (
-    <span className="inline-flex gap-0.5">
+    <span className="inline-flex gap-0.5 items-center">
       {[1, 2, 3, 4, 5].map((s) => (
         <span key={s} className={s <= Math.round(value) ? 'text-yellow-400' : 'text-gray-200'}>★</span>
       ))}
-      <span className="ml-1 text-sm font-medium text-gray-700">{value.toFixed(1)}</span>
+      <span className="ml-1 text-[12px] font-medium text-content">{value.toFixed(1)}</span>
     </span>
   );
 }
@@ -113,21 +112,28 @@ export default function ReportsPage() {
     load();
   }, [isGroupAdmin, isCompanyAdmin, user?.companyId, accessToken]);
 
-  if (isLoading) return <div className="p-8 text-center text-muted-foreground">Đang tải...</div>;
+  if (isLoading) {
+    return (
+      <div className="bg-surface rounded-xl border border-default shadow-card py-16 text-center text-[12px] text-faint">
+        Đang tải...
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-8">
+    <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Báo cáo & Phân tích</h1>
-          <p className="text-sm text-muted-foreground mt-1">Tổng quan tiến độ học tập</p>
+          <h1 className="text-[16px] font-semibold text-content">Báo cáo &amp; Phân tích</h1>
+          <p className="text-[12px] text-subtle mt-0.5">Tổng quan tiến độ học tập</p>
         </div>
         <div className="flex gap-2">
           <Link
             href="/reports/compliance"
-            className="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50"
+            className="px-3 py-1.5 text-[12px] font-medium border border-default rounded-lg hover:bg-muted text-content transition-colors"
           >
-            Báo cáo Compliance →
+            Báo cáo Tuân thủ →
           </Link>
           {isCompanyAdmin && user?.companyId && (
             <ExportButton companyId={user.companyId} accessToken={accessToken!} />
@@ -138,7 +144,7 @@ export default function ReportsPage() {
       {/* Group Admin section */}
       {isGroupAdmin && groupOverview && (
         <section className="space-y-4">
-          <h2 className="text-base font-semibold text-gray-700">Toàn tập đoàn</h2>
+          <h2 className="text-[13px] font-medium text-content">Toàn tập đoàn</h2>
           <KpiCards cards={[
             { label: 'Số công ty', value: groupOverview.totalCompanies, color: 'blue' },
             { label: 'Tổng người dùng', value: groupOverview.totalUsers.toLocaleString() },
@@ -155,53 +161,53 @@ export default function ReportsPage() {
             />
           )}
 
-          {/* Rating report - group level */}
+          {/* Rating report — group level */}
           {groupRatings && (
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-gray-700">Đánh giá chất lượng khóa học</h3>
+              <h3 className="text-[13px] font-medium text-content">Đánh giá chất lượng khóa học</h3>
               {groupRatings.summary && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="bg-white rounded-xl border p-4">
-                    <p className="text-xs text-gray-500">Tổng đánh giá</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">{groupRatings.summary.totalRatings.toLocaleString()}</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="bg-surface rounded-xl border border-default shadow-card p-4">
+                    <p className="text-[11px] text-subtle">Tổng đánh giá</p>
+                    <p className="text-[22px] font-bold text-content mt-1">{groupRatings.summary.totalRatings.toLocaleString()}</p>
                   </div>
-                  <div className="bg-white rounded-xl border p-4">
-                    <p className="text-xs text-gray-500">Điểm TB toàn hệ thống</p>
+                  <div className="bg-surface rounded-xl border border-default shadow-card p-4">
+                    <p className="text-[11px] text-subtle">Điểm TB toàn hệ thống</p>
                     <div className="mt-1">
                       {groupRatings.summary.avgRating !== null
                         ? <StarRating value={groupRatings.summary.avgRating} />
-                        : <span className="text-gray-400 text-sm">Chưa có</span>}
+                        : <span className="text-faint text-[12px]">Chưa có</span>}
                     </div>
                   </div>
-                  <div className="bg-white rounded-xl border p-4">
-                    <p className="text-xs text-gray-500">Khóa học có đánh giá</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                  <div className="bg-surface rounded-xl border border-default shadow-card p-4">
+                    <p className="text-[11px] text-subtle">Khóa học có đánh giá</p>
+                    <p className="text-[22px] font-bold text-content mt-1">
                       {groupRatings.summary.ratedCoursesCount}
-                      <span className="text-sm font-normal text-gray-400"> / {groupRatings.summary.totalCoursesCount}</span>
+                      <span className="text-[13px] font-normal text-faint"> / {groupRatings.summary.totalCoursesCount}</span>
                     </p>
                   </div>
                 </div>
               )}
               {groupRatings.topRated.length > 0 && (
-                <div className="bg-white rounded-xl border overflow-hidden">
-                  <div className="px-4 py-3 border-b bg-gray-50">
-                    <p className="text-sm font-medium text-gray-700">Top khóa học được đánh giá cao nhất</p>
+                <div className="bg-surface rounded-xl border border-default shadow-card overflow-hidden">
+                  <div className="px-4 py-3 border-b border-default bg-muted">
+                    <p className="text-[13px] font-medium text-content">Top khóa học được đánh giá cao nhất</p>
                   </div>
-                  <div className="divide-y">
+                  <div className="divide-y divide-default">
                     {groupRatings.topRated.map((r, i) => (
-                      <div key={r.courseId} className="flex items-center justify-between px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <span className="w-6 h-6 rounded-full bg-yellow-100 text-yellow-700 text-xs font-bold flex items-center justify-center shrink-0">
+                      <div key={r.courseId} className="flex items-center justify-between px-4 py-3 hover:bg-muted/40 transition-colors">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="w-6 h-6 rounded-full bg-yellow-100 text-yellow-700 text-[11px] font-bold flex items-center justify-center shrink-0">
                             {i + 1}
                           </span>
-                          <div>
-                            <p className="text-sm font-medium text-gray-800 line-clamp-1">{r.courseTitle}</p>
-                            {r.companyName && <p className="text-xs text-gray-400">{r.companyName}</p>}
+                          <div className="min-w-0">
+                            <p className="text-[12px] font-medium text-content line-clamp-1">{r.courseTitle}</p>
+                            {r.companyName && <p className="text-[11px] text-faint">{r.companyName}</p>}
                           </div>
                         </div>
-                        <div className="text-right shrink-0">
+                        <div className="text-right shrink-0 ml-3">
                           <StarRating value={r.avgRating} />
-                          <p className="text-xs text-gray-400 mt-0.5">{r.ratingCount} đánh giá</p>
+                          <p className="text-[11px] text-faint mt-0.5">{r.ratingCount} đánh giá</p>
                         </div>
                       </div>
                     ))}
@@ -216,7 +222,7 @@ export default function ReportsPage() {
       {/* Company Admin section */}
       {isCompanyAdmin && companyOverview && (
         <section className="space-y-4">
-          <h2 className="text-base font-semibold text-gray-700">Tổng quan công ty</h2>
+          <h2 className="text-[13px] font-medium text-content">Tổng quan công ty</h2>
           <KpiCards cards={[
             { label: 'Nhân viên', value: companyOverview.totalUsers.toLocaleString() },
             { label: 'Khóa học', value: companyOverview.totalCourses },
@@ -232,29 +238,29 @@ export default function ReportsPage() {
             />
           )}
 
-          {/* Rating report - company level */}
+          {/* Rating report — company level */}
           {companyRatings && (
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-gray-700">Đánh giá chất lượng khóa học</h3>
+              <h3 className="text-[13px] font-medium text-content">Đánh giá chất lượng khóa học</h3>
               {companyRatings.summary && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <div className="bg-white rounded-xl border p-4">
-                    <p className="text-xs text-gray-500">Tổng đánh giá</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">{companyRatings.summary.totalRatings.toLocaleString()}</p>
+                  <div className="bg-surface rounded-xl border border-default shadow-card p-4">
+                    <p className="text-[11px] text-subtle">Tổng đánh giá</p>
+                    <p className="text-[22px] font-bold text-content mt-1">{companyRatings.summary.totalRatings.toLocaleString()}</p>
                   </div>
-                  <div className="bg-white rounded-xl border p-4">
-                    <p className="text-xs text-gray-500">Điểm trung bình</p>
+                  <div className="bg-surface rounded-xl border border-default shadow-card p-4">
+                    <p className="text-[11px] text-subtle">Điểm trung bình</p>
                     <div className="mt-1">
                       {companyRatings.summary.avgRating !== null
                         ? <StarRating value={companyRatings.summary.avgRating} />
-                        : <span className="text-gray-400 text-sm">Chưa có đánh giá</span>}
+                        : <span className="text-faint text-[12px]">Chưa có đánh giá</span>}
                     </div>
                   </div>
-                  <div className="bg-white rounded-xl border p-4">
-                    <p className="text-xs text-gray-500">Khóa học có đánh giá</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">
+                  <div className="bg-surface rounded-xl border border-default shadow-card p-4">
+                    <p className="text-[11px] text-subtle">Khóa học có đánh giá</p>
+                    <p className="text-[22px] font-bold text-content mt-1">
                       {companyRatings.summary.ratedCoursesCount}
-                      <span className="text-sm font-normal text-gray-400"> / {companyRatings.summary.totalCoursesCount}</span>
+                      <span className="text-[13px] font-normal text-faint"> / {companyRatings.summary.totalCoursesCount}</span>
                     </p>
                   </div>
                 </div>
@@ -262,16 +268,16 @@ export default function ReportsPage() {
               {(companyRatings.topRated.length > 0 || companyRatings.bottomRated.length > 0) && (
                 <div className="grid sm:grid-cols-2 gap-3">
                   {companyRatings.topRated.length > 0 && (
-                    <div className="bg-white rounded-xl border overflow-hidden">
-                      <div className="px-4 py-3 border-b bg-green-50">
-                        <p className="text-sm font-medium text-green-800">Khóa học được đánh giá cao</p>
+                    <div className="bg-surface rounded-xl border border-default shadow-card overflow-hidden">
+                      <div className="px-4 py-3 border-b border-green-200 bg-green-50">
+                        <p className="text-[12px] font-medium text-green-800">Khóa học được đánh giá cao</p>
                       </div>
-                      <div className="divide-y">
+                      <div className="divide-y divide-default">
                         {companyRatings.topRated.map((r, i) => (
-                          <div key={r.courseId} className="flex items-center justify-between px-4 py-2.5">
+                          <div key={r.courseId} className="flex items-center justify-between px-4 py-2.5 hover:bg-muted/40 transition-colors">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs font-bold text-gray-400 shrink-0">{i + 1}.</span>
-                              <p className="text-sm text-gray-800 truncate">{r.courseTitle}</p>
+                              <span className="text-[11px] font-bold text-faint shrink-0">{i + 1}.</span>
+                              <p className="text-[12px] text-content truncate">{r.courseTitle}</p>
                             </div>
                             <div className="shrink-0 ml-2">
                               <StarRating value={r.avgRating} />
@@ -282,16 +288,16 @@ export default function ReportsPage() {
                     </div>
                   )}
                   {companyRatings.bottomRated.length > 0 && (
-                    <div className="bg-white rounded-xl border overflow-hidden">
-                      <div className="px-4 py-3 border-b bg-red-50">
-                        <p className="text-sm font-medium text-red-800">Khóa học cần cải thiện</p>
+                    <div className="bg-surface rounded-xl border border-default shadow-card overflow-hidden">
+                      <div className="px-4 py-3 border-b border-red-200 bg-red-50">
+                        <p className="text-[12px] font-medium text-red-800">Khóa học cần cải thiện</p>
                       </div>
-                      <div className="divide-y">
+                      <div className="divide-y divide-default">
                         {companyRatings.bottomRated.map((r, i) => (
-                          <div key={r.courseId} className="flex items-center justify-between px-4 py-2.5">
+                          <div key={r.courseId} className="flex items-center justify-between px-4 py-2.5 hover:bg-muted/40 transition-colors">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs font-bold text-gray-400 shrink-0">{i + 1}.</span>
-                              <p className="text-sm text-gray-800 truncate">{r.courseTitle}</p>
+                              <span className="text-[11px] font-bold text-faint shrink-0">{i + 1}.</span>
+                              <p className="text-[12px] text-content truncate">{r.courseTitle}</p>
                             </div>
                             <div className="shrink-0 ml-2">
                               <StarRating value={r.avgRating} />
@@ -310,10 +316,9 @@ export default function ReportsPage() {
 
       {/* Group HRM — only sees comparison */}
       {isGroupHrm && !isGroupAdmin && companyComparison.length === 0 && (
-        <section>
-          <h2 className="text-base font-semibold text-gray-700 mb-4">So sánh công ty</h2>
-          <p className="text-sm text-muted-foreground">Không có dữ liệu</p>
-        </section>
+        <div className="bg-surface rounded-xl border border-default shadow-card py-16 text-center text-[12px] text-faint">
+          Không có dữ liệu
+        </div>
       )}
     </div>
   );

@@ -25,11 +25,11 @@ function rateColor(rate: number): string {
 
 export function CompletionChart({ data, title }: CompletionChartProps) {
   return (
-    <div className="bg-white border rounded-xl p-5">
-      {title && <h3 className="text-sm font-semibold text-gray-700 mb-4">{title}</h3>}
+    <div className="bg-surface border border-default rounded-xl shadow-card p-4">
+      {title && <h3 className="text-[13px] font-medium text-content mb-3">{title}</h3>}
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border, #e5e7eb)" />
           <XAxis
             dataKey="label"
             tick={{ fontSize: 11 }}
@@ -41,7 +41,8 @@ export function CompletionChart({ data, title }: CompletionChartProps) {
           <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11 }} />
           <Tooltip
             formatter={(value: number) => [`${value}%`, 'Tỷ lệ hoàn thành']}
-            labelStyle={{ fontSize: 12 }}
+            labelStyle={{ fontSize: 11 }}
+            contentStyle={{ fontSize: 11, borderRadius: '8px', border: '1px solid #e5e7eb' }}
           />
           <Bar dataKey="rate" radius={[4, 4, 0, 0]}>
             {data.map((entry, i) => (

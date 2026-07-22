@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/components/providers/auth-provider';
 import { ComplianceTable } from '@/components/reports/compliance-table';
 import { ExportButton } from '@/components/reports/export-button';
+import { ShieldCheck } from 'lucide-react';
 
 interface ComplianceData {
   rows: {
@@ -44,19 +45,20 @@ export default function CompliancePage() {
   useEffect(() => { fetchData(overdueOnly); }, [overdueOnly, user?.companyId]);
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Báo cáo Compliance</h1>
-          <p className="text-sm text-muted-foreground mt-1">Khóa học bắt buộc & tiến độ tuân thủ</p>
+          <h1 className="text-[16px] font-semibold text-content">Báo cáo Tuân thủ</h1>
+          <p className="text-[12px] text-subtle mt-0.5">Khóa học bắt buộc &amp; tiến độ tuân thủ</p>
         </div>
         <div className="flex gap-2 items-center">
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <label className="flex items-center gap-2 text-[12px] text-content cursor-pointer select-none">
             <input
               type="checkbox"
               checked={overdueOnly}
               onChange={(e) => setOverdueOnly(e.target.checked)}
-              className="rounded"
+              className="rounded border-default"
             />
             Chỉ trễ hạn
           </label>
@@ -67,9 +69,14 @@ export default function CompliancePage() {
       </div>
 
       {isLoading ? (
-        <div className="py-16 text-center text-muted-foreground">Đang tải...</div>
+        <div className="bg-surface rounded-xl border border-default shadow-card py-16 text-center text-[12px] text-faint">
+          Đang tải...
+        </div>
       ) : !data ? (
-        <div className="py-16 text-center text-muted-foreground">Không có dữ liệu</div>
+        <div className="bg-surface rounded-xl border border-default shadow-card py-16 text-center text-[12px] text-faint">
+          <ShieldCheck size={32} className="mx-auto mb-2 text-faint/40" />
+          Không có dữ liệu
+        </div>
       ) : (
         <ComplianceTable rows={data.rows} summary={data.summary} totals={data.totals} />
       )}
