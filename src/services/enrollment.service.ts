@@ -44,7 +44,8 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
     ),
 
     -- Toàn bộ org IDs trong chuỗi tổ tiên (org trực tiếp + cha + ông...) của user.
-    -- Dùng để cascade company_assign từ phòng ban cha xuống phòng ban con.
+    -- Dùng cho trường hợp cascadeToSubDepts = true: giao cho phòng ban cha
+    -- thì phòng ban con cũng nhận được khóa học.
     user_ancestor_orgs AS (
       SELECT "organizationId" AS id FROM user_org
       UNION
@@ -71,6 +72,8 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
     ),
 
     -- ② learning_group: Khóa học trong nhóm mà user là thành viên
+    -- TENANT ISOLATION: phải lọc theo companyId ở cả GroupMember lẫn LearningGroup
+    -- để tránh học viên phòng ban/công ty khác nhìn thấy khóa học không dành cho họ
     source2 AS (
       SELECT
         c.id, c.title, c.description, c."thumbnailUrl", c."estimatedHours",
@@ -85,12 +88,16 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
       WHERE gm."userId" = ${userId}
         AND gm."removedAt" IS NULL
         AND gm."isActive" = true
+        AND gm."companyId" = ${companyId}
+        AND (lg."companyId" = ${companyId} OR lg."companyId" IS NULL)
         AND lg."isActive" = true
         AND c."isPublished" = true
         AND c."isActive" = true
     ),
 
     -- ③ company_assign: Assign trực tiếp cho user hoặc phòng ban
+    -- targetDeptId + cascadeToSubDepts = false → chỉ thành viên trực tiếp của phòng đó nhận
+    -- targetDeptId + cascadeToSubDepts = true  → thành viên phòng đó VÀ tất cả phòng con nhận
     source3 AS (
       SELECT
         c.id, c.title, c.description, c."thumbnailUrl", c."estimatedHours",
@@ -102,8 +109,17 @@ async function fetchMyCourses(userId: string, companyId: string): Promise<Course
       JOIN "Organization" org ON org.id = c."ownerCompanyId"
       WHERE (
         ca."targetUserId" = ${userId}
-        OR ca."targetDeptId" IN (SELECT id FROM user_ancestor_orgs WHERE id IS NOT NULL)
         OR ca."targetCompanyId" = ${companyId}
+        OR (
+          ca."targetDeptId" IS NOT NULL
+          AND ca."cascadeToSubDepts" = false
+          AND ca."targetDeptId" IN (SELECT "organizationId" FROM user_org)
+        )
+        OR (
+          ca."targetDeptId" IS NOT NULL
+          AND ca."cascadeToSubDepts" = true
+          AND ca."targetDeptId" IN (SELECT id FROM user_ancestor_orgs WHERE id IS NOT NULL)
+        )
       )
         AND c."isPublished" = true
         AND c."isActive" = true
@@ -361,7 +377,7 @@ export async function updateLessonProgress(
     where: { enrollmentId_lessonId: { enrollmentId: enrollment.id, lessonId } },
     update: {
       progressPct: data.progressPct,
-      timeSpentSec: { increment: data.timeSpentSec ?? 0 },
+      ...(data.timeSpentSec != null ? { timeSpentSec: { increment: Math.max(0, Math.min(data.timeSpentSec, 7200)) } } : {}),
       status,
       startedAt: undefined,   // keep existing
       completedAt: status === 'completed' ? new Date() : null,
@@ -370,7 +386,7 @@ export async function updateLessonProgress(
       enrollmentId: enrollment.id,
       lessonId,
       progressPct: data.progressPct,
-      timeSpentSec: data.timeSpentSec ?? 0,
+      timeSpentSec: Math.max(0, Math.min(data.timeSpentSec ?? 0, 7200)),
       status,
       startedAt: new Date(),
       completedAt: status === 'completed' ? new Date() : null,

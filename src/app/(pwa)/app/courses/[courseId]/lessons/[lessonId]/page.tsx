@@ -65,10 +65,6 @@ export default function LessonPlayerPage() {
   const [submittingRating, setSubmittingRating] = useState(false)
   const [ratingSubmitted, setRatingSubmitted] = useState(false)
 
-  // urlKey — increment every 15 min to remount VideoPlayer → fresh presigned URL fetch
-  const [urlKey, setUrlKey] = useState(0)
-  const renewTimer = useRef<ReturnType<typeof setInterval> | null>(null)
-
   // Progress batch queue — flush every 10s
   const progressQueue = useRef<{ pct: number; ts: number }[]>([])
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -124,16 +120,6 @@ export default function LessonPlayerPage() {
     setNotes(saved)
   }, [lessonId])
 
-  // ── URL renewal — remount VideoPlayer every 15 min ────────────
-  useEffect(() => {
-    renewTimer.current = setInterval(() => {
-      setUrlKey((k) => k + 1)
-    }, 15 * 60 * 1000)
-    return () => {
-      if (renewTimer.current) clearInterval(renewTimer.current)
-    }
-  }, [])
-
   // ── Progress flush ─────────────────────────────────────────────
   const flushProgress = useCallback(async (forcePct?: number) => {
     if (!accessToken || !courseId || !lessonId) return
@@ -151,7 +137,6 @@ export default function LessonPlayerPage() {
       body: JSON.stringify({
         progressPct: Math.min(pct, 100),
         status: isCompleted ? 'completed' : 'in_progress',
-        ...(isCompleted ? { timeSpentSec: Math.floor(Date.now() / 1000) } : {}),
       }),
     }).catch(() => {})
   }, [accessToken, courseId, lessonId])
@@ -165,6 +150,22 @@ export default function LessonPlayerPage() {
       flushProgress()
     }
   }, [flushProgress])
+
+  // Flush khi user đóng tab (keepalive giữ request sống)
+  useEffect(() => {
+    const flushOnUnload = () => {
+      const pct = progressQueue.current[progressQueue.current.length - 1]?.pct
+      if (!pct || pct <= lastFlushPct.current || !courseId || !lessonId || !accessToken) return
+      fetch(`/api/my/courses/${courseId}/lessons/${lessonId}/progress`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ progressPct: Math.min(pct, 100), status: pct >= 90 ? 'completed' : 'in_progress' }),
+        keepalive: true,
+      }).catch(() => {})
+    }
+    window.addEventListener('beforeunload', flushOnUnload)
+    return () => window.removeEventListener('beforeunload', flushOnUnload)
+  }, [courseId, lessonId, accessToken]) // eslint-disable-line
 
   // ── Video progress tracking (timeupdate via DOM) ───────────────
   useEffect(() => {
@@ -305,11 +306,15 @@ export default function LessonPlayerPage() {
         <div className="bg-black">
           {lesson.assetId ? (
             <VideoPlayer
-              key={`player-${urlKey}`}
+              key={lesson.assetId}
               assetId={lesson.assetId}
               enrollmentId={lesson.enrollmentId ?? undefined}
               accessToken={accessToken!}
               onComplete={handleVideoComplete}
+              onProgress={(pct) => {
+                progressQueue.current.push({ pct, ts: Date.now() });
+              }}
+              initialProgressPct={lesson.progress?.progressPct ?? 0}
             />
           ) : (
             <NoContentPlaceholder label="Chưa có video cho bài học này" />
