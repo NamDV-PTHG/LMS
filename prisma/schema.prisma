@@ -181,15 +181,16 @@ model CoursePublication {
 
 // Cơ chế ③: company_admin / hr_manager assign nội bộ
 model CourseAssignment {
-  id              String    @id @default(uuid())
-  courseId        String
-  targetCompanyId String?
-  targetDeptId    String?
-  targetUserId    String?
-  assignedById    String
-  deadline        DateTime?
-  isMandatory     Boolean   @default(false)
-  assignedAt      DateTime  @default(now())
+  id                 String    @id @default(uuid())
+  courseId           String
+  targetCompanyId    String?
+  targetDeptId       String?
+  targetUserId       String?
+  assignedById       String
+  deadline           DateTime?
+  isMandatory        Boolean   @default(false)
+  cascadeToSubDepts  Boolean   @default(false)
+  assignedAt         DateTime  @default(now())
 
   course       Course        @relation(fields: [courseId], references: [id])
   assignedBy   User          @relation("AssignedCourses", fields: [assignedById], references: [id])
